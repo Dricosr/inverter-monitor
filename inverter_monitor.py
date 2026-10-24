@@ -53,6 +53,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 DONGLE_UDP_PORT = 58899
 LOCAL_TCP_PORT = 8899  # porta em que o dongle conecta de volta (fixa no firmware)
 
+__version__ = "1.0.0"
+
 log = logging.getLogger("inverter")
 
 
@@ -203,9 +205,8 @@ def _modbus_block(link: Dongle, start: int, count: int, slave: int = 1) -> list[
     return [body[3 + i * 2] << 8 | body[4 + i * 2] for i in range(n)]
 
 
-def read_modbus_a(link: Dongle) -> dict:
-    """Mapa EG4/Axpert (regs 200-244)."""
-    r = _modbus_block(link, 200, 45)
+def parse_modbus_a(r: list[int]) -> dict:
+    """Decodifica o bloco de 45 registradores (200-244) do mapa EG4/Axpert."""
     g = lambda reg: r[reg - 200]
     return {
         "protocol": "modbus_a",
@@ -238,6 +239,11 @@ def read_modbus_a(link: Dongle) -> dict:
     }
 
 
+def read_modbus_a(link: Dongle) -> dict:
+    """Mapa EG4/Axpert (regs 200-244)."""
+    return parse_modbus_a(_modbus_block(link, 200, 45))
+
+
 def read_modbus_b(link: Dongle) -> dict:
     """Mapa Anenji/Megarevo (bateria em 277-281, saida em 252-255)."""
     bat = _modbus_block(link, 277, 5)
@@ -247,14 +253,20 @@ def read_modbus_b(link: Dongle) -> dict:
     except Exception:
         grid = [0, 0]
     ac = _modbus_block(link, 342, 2)
-    grid_v = round(s16(grid[0]) / 10, 1) if grid and grid[0] else None
-    grid_f = round(s16(grid[1]) / 100, 2) if len(grid) > 1 and grid[1] else None
     pv = {}
     for reg, key in ((351, "pv1"), (389, "pv2")):
         try:
             pv[key] = round(_modbus_block(link, reg, 1)[0] / 10, 1)
         except Exception:
             pv[key] = None
+    return parse_modbus_b(bat, out, grid, ac, pv)
+
+
+def parse_modbus_b(bat: list[int], out: list[int], grid: list[int],
+                   ac: list[int], pv: dict) -> dict:
+    """Decodifica os blocos do mapa Anenji/Megarevo."""
+    grid_v = round(s16(grid[0]) / 10, 1) if grid and grid[0] else None
+    grid_f = round(s16(grid[1]) / 100, 2) if len(grid) > 1 and grid[1] else None
     return {
         "protocol": "modbus_b",
         "mode": None,
@@ -277,12 +289,14 @@ def read_modbus_b(link: Dongle) -> dict:
     }
 
 
-def read_pi30(link: Dongle) -> dict:
-    """Familia PI30 (ASCII): QPIGS + QMOD + QID."""
-    raw = link.ask(4, pi30(b"QPIGS"), timeout=12).decode("ascii", "replace")
+def parse_qpigs(raw: str, mode_letter: str = "?", serial: str | None = None) -> dict:
+    """Decodifica a resposta QPIGS (ASCII) em campos nomeados."""
     if not (raw.startswith("(") and raw.endswith("\r")):
         raise ValueError(f"resposta QPIGS inesperada: {raw!r}")
-    f = raw[1:-3].split()
+    body = raw[1:-3]
+    if body.startswith("NAK"):
+        raise ValueError("inversor respondeu NAK (comando nao suportado)")
+    f = body.split()
 
     def num(i, default=0.0):
         try:
@@ -290,14 +304,6 @@ def read_pi30(link: Dongle) -> dict:
         except (IndexError, ValueError):
             return default
 
-    try:
-        mode_letter = link.ask(4, pi30(b"QMOD"), timeout=6).decode("ascii", "replace")[1:2]
-    except Exception:
-        mode_letter = "?"
-    try:
-        serial = link.ask(4, pi30(b"QID"), timeout=6).decode("ascii", "replace")[1:-3]
-    except Exception:
-        serial = None
     return {
         "protocol": "pi30",
         "mode": MODES_PI30.get(mode_letter, mode_letter),
@@ -321,6 +327,20 @@ def read_pi30(link: Dongle) -> dict:
         "bus_voltage": int(num(7)),
         "temperature": {"inverter": int(num(11))},
     }
+
+
+def read_pi30(link: Dongle) -> dict:
+    """Familia PI30 (ASCII): QPIGS + QMOD + QID."""
+    raw = link.ask(4, pi30(b"QPIGS"), timeout=12).decode("ascii", "replace")
+    try:
+        mode_letter = link.ask(4, pi30(b"QMOD"), timeout=6).decode("ascii", "replace")[1:2]
+    except Exception:
+        mode_letter = "?"
+    try:
+        serial = link.ask(4, pi30(b"QID"), timeout=6).decode("ascii", "replace")[1:-3]
+    except Exception:
+        serial = None
+    return parse_qpigs(raw, mode_letter, serial)
 
 
 READERS = {"modbus_a": read_modbus_a, "modbus_b": read_modbus_b, "pi30": read_pi30}
@@ -489,6 +509,7 @@ def main() -> int:
     ap.add_argument("--http", type=int, default=8080, help="porta da API HTTP (0 desliga)")
     ap.add_argument("--out", default="data/latest.json", help="arquivo JSON de saida")
     ap.add_argument("-v", "--verbose", action="store_true")
+    ap.add_argument("--version", action="version", version=f"inverter-monitor {__version__}")
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,

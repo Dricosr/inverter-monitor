@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "inverter-monitor"
+version = "1.0.0"
+description = "Leitura local (LAN) de inversores híbridos com dongle Eybond/DessMonitor, sem nuvem"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "Adriano Silva Ribeiro", email = "dricosr@hotmail.com" }]
+keywords = ["inverter", "solar", "modbus", "pi30", "eybond", "smartess", "battery", "soc"]
+classifiers = [
+  "Development Status :: 5 - Production/Stable",
+  "Environment :: Console",
+  "Intended Audience :: End Users/Desktop",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Topic :: Home Automation",
+  "Topic :: System :: Hardware",
+]
+dependencies = []
+
+[project.scripts]
+inverter-monitor = "inverter_monitor:main"
+
+[project.urls]
+Homepage = "https://github.com/Dricosr/inverter-monitor"
+Documentation = "https://github.com/Dricosr/inverter-monitor/blob/main/docs/PROTOCOL.md"
+Changelog = "https://github.com/Dricosr/inverter-monitor/blob/main/CHANGELOG.md"
+
+[tool.setuptools]
+py-modules = ["inverter_monitor"]
