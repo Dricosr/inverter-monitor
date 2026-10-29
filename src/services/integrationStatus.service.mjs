@@ -33,13 +33,26 @@ async function aiNodeMiningStatus(baseUrl) {
     const value = await jsonRequest(`${baseUrl}/v1/mining`);
     return {
       online: true,
-      hashrate: value?.hashrate ?? value?.hashrate10s ?? null,
+      ...normalizeAiNodeHashrate(value),
       governor: value?.governor ?? null,
       threads: value?.threads ?? null,
+      running: value?.running === true,
     };
   } catch (error) {
     return { online: false, error: error.message };
   }
+}
+
+export function normalizeAiNodeHashrate(value) {
+  const nested = value?.hashrate && typeof value.hashrate === 'object' ? value.hashrate : {};
+  const scalar = typeof value?.hashrate === 'number' ? value.hashrate : null;
+
+  return {
+    hashrate: nested.now10s ?? value?.hashrate10s ?? scalar,
+    hashrate10s: nested.now10s ?? value?.hashrate10s ?? scalar,
+    hashrate60s: nested.now60s ?? value?.hashrate60s ?? null,
+    hashrate15m: nested.now15m ?? value?.hashrate15m ?? null,
+  };
 }
 
 async function ep2MiningStatus(baseUrl, configPath, configuredToken) {

@@ -175,7 +175,11 @@ function miningDetail(data) {
   if (!data?.online) return null;
   const hashrate = Number.isFinite(data.hashrate) ? `${data.hashrate.toLocaleString('pt-BR')} H/s` : 'Hashrate indisponivel';
   const governor = data.governor?.mode ? ` · modo ${data.governor.mode}` : '';
-  return `${hashrate}${governor}`;
+  const state = data.running === false ? ' · mineracao parada' : '';
+  const windows = Number.isFinite(data.hashrate60s) && Number.isFinite(data.hashrate15m)
+    ? ` · 60 s ${data.hashrate60s.toLocaleString('pt-BR')} · 15 min ${data.hashrate15m.toLocaleString('pt-BR')}`
+    : '';
+  return `${hashrate}${windows}${governor}${state}`;
 }
 
 function renderRules(rules, intentions, devices) {
