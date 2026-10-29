@@ -19,10 +19,17 @@ export class Ep2MiningActionExecutor {
     const { stdout } = await execute(
       'powershell.exe',
       ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', this.script, '-Threads', String(threads)],
-      { windowsHide: true, timeout: 60_000 },
+      { windowsHide: true, timeout: 90_000 },
     );
-    const changed = stdout.trim().endsWith('changed=true');
-    return { changed, detail: changed ? `${threads} threads configuradas` : `${threads} threads ja configuradas` };
+    const changed = /changed=true/.test(stdout);
+    const verified = /verified=true/.test(stdout);
+    if (!verified) throw new Error(`XMRig nao confirmou ${threads} threads`);
+    return {
+      changed,
+      applied: target === 'active',
+      owned: target === 'active',
+      detail: changed ? `${threads} threads aplicadas` : `${threads} threads ja estavam ativas`,
+    };
   }
 
   #reducedThreads(desiredIntensity) {

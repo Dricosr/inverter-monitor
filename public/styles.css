@@ -89,11 +89,16 @@ h2 { margin: 2px 0 0; font-size: 22px; }
 .notice.warning { border-color: var(--yellow); background: #211e14; }
 
 .rules-list { display: grid; gap: 12px; }
-.rule-card { padding: 16px 18px; display: grid; grid-template-columns: minmax(180px, 1.4fr) repeat(3, minmax(110px, .7fr)) auto; gap: 16px; align-items: center; }
+.rule-card { padding: 16px 18px; display: grid; grid-template-columns: minmax(180px, 1.4fr) repeat(3, minmax(110px, .7fr)) minmax(150px, 1fr) auto; gap: 16px; align-items: center; }
 .rule-card h3 { margin: 0 0 5px; font-size: 16px; }
 .rule-card small { color: var(--muted); }
-.rule-state { color: var(--muted); font-size: 12px; }
+.rule-state { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
 .rule-state.active { color: var(--yellow); }
+.rule-state.error { color: var(--red); }
+.rule-state.ok { color: var(--green); }
+.execution-state { display: grid; gap: 3px; min-width: 0; }
+.execution-state small { color: var(--muted); font-size: 11px; }
+.execution-state strong { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
 .rule-actions { display: flex; gap: 8px; }
 
 dialog { width: min(520px, calc(100vw - 30px)); border: 1px solid var(--line); border-radius: 14px; background: #111923; color: var(--text); padding: 22px; }

@@ -296,6 +296,52 @@ retomada e intensidade reduzida. O executor mantém estado persistido e verifica
 estado real antes de enviar a ação; falhas em uma regra não interrompem as demais.
 Gate não é alterado por este projeto.
 
+### Ciclo de vida de cada ação
+
+O executor roda a cada 10 s (`DASHBOARD_POLL_MS`) e segue sempre este contrato:
+
+| Situação | O que acontece |
+| --- | --- |
+| SOC abaixo de `activateBelow` | aplica a ação (pausa/reduz) |
+| SOC entre os dois limites | mantém o último alvo (histerese), sem alternar |
+| SOC acima de `resumeAbove` | libera (retoma/restaura o máximo) |
+| SOC indisponível | não mexe em nada, mantém o estado aplicado |
+| regra desabilitada ou excluída | libera o recurso que ela havia aplicado |
+| ação já está no estado desejado | não repete o comando (idempotente) |
+
+### Pausa do Gate: posse e conflito
+
+A pausa do Gate é identificada por `pausedAt` em `GET /v1/status`. A automação só
+retoma uma pausa **que ela mesma criou**:
+
+- ao pausar, guarda o `pausedAt` devolvido pelo Gate;
+- ao liberar, compara o `pausedAt` atual com o guardado — se mudou, registra
+  `conflito` e **não retoma** (a pausa é de outra pessoa/sistema);
+- pausa feita no painel do Gate nunca é desfeita pela automação.
+
+Sem essa checagem a automação e o operador ficam se desfazendo mutuamente: a regra
+em histerese reaplicava `retomar` logo depois de uma pausa manual.
+
+### Verificação
+
+```powershell
+# estado real dos três alvos
+Invoke-RestMethod http://192.168.18.150:3070/v1/status | Select-Object -ExpandProperty gate
+
+# EP2: threads reais do processo
+Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'xmrig.exe' }
+
+# ai-node: CPUQuota aplicado
+ssh ai-node '/usr/local/sbin/ainode-mining-mode status'
+
+# o que a automação decidiu/aplicou
+Invoke-RestMethod http://127.0.0.1:3071/api/dashboard | Select-Object -ExpandProperty execution
+```
+
+Testes: `npm test` cobre independência das ações, histerese, liberação ao desabilitar
+ou excluir a regra, isolamento de falhas, hidratação do estado no restart e conflito
+de pausa.
+
 ## Integração com outros sistemas
 
 **PowerShell** — [`examples/powershell.ps1`](examples/powershell.ps1)

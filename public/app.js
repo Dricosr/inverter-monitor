@@ -186,14 +186,14 @@ function renderRules(rules, intentions, devices) {
   elements.rules.innerHTML = rules.length ? rules.map((rule) => {
     const intention = intentions.find((item) => item.ruleId === rule.id);
     const source = devices.find((device) => device.id === rule.sourceDeviceId);
-    const active = intention?.wouldExecute;
     const execution = state.dashboard.execution.actions?.[rule.id] ?? {};
+    const state = ruleState(rule, intention, execution);
     return `<article class="rule-card">
       <div><h3>${escapeHtml(rule.name)}</h3><small>${escapeHtml(actionName(rule.action))}</small></div>
       <div><small>Referência</small><strong>${escapeHtml(source?.name || rule.sourceDeviceId)}</strong></div>
       <div><small>Faixa SOC</small><strong>${rule.activateBelow}% a ${rule.resumeAbove}%</strong></div>
-      <div class="rule-state ${active ? 'active' : ''}">${active ? 'AÇÃO ATIVA' : intentionState(intention?.state)}</div>
-      <div class="execution-state"><small>Execução</small><strong>${escapeHtml(execution.detail?.detail ?? execution.detail ?? execution.outcome ?? 'aguardando')}</strong></div>
+      <div class="rule-state ${state.tone}">${escapeHtml(state.label)}</div>
+      <div class="execution-state"><small>Última execução</small><strong title="${escapeHtml(state.detail)}">${escapeHtml(state.detail)}</strong></div>
       <div class="rule-actions">
         <button class="button secondary" data-edit-rule="${escapeHtml(rule.id)}">Editar</button>
         <button class="button danger" data-delete-rule="${escapeHtml(rule.id)}">Excluir</button>
@@ -202,6 +202,34 @@ function renderRules(rules, intentions, devices) {
   }).join('') : '<div class="notice"><strong>Nenhuma regra configurada</strong><span>Crie uma intenção para acompanhar o SOC.</span></div>';
   document.querySelectorAll('[data-edit-rule]').forEach((button) => button.addEventListener('click', () => openRule(button.dataset.editRule)));
   document.querySelectorAll('[data-delete-rule]').forEach((button) => button.addEventListener('click', () => deleteRule(button.dataset.deleteRule)));
+}
+
+function ruleState(rule, intention, execution) {
+  const detail = execution.detail?.detail ?? (typeof execution.detail === 'string' ? execution.detail : '');
+  const when = execution.updatedAt ? ` · ${formatClock(execution.updatedAt)}` : '';
+  if (execution.outcome === 'erro') {
+    return { tone: 'error', label: 'FALHA', detail: `${detail || 'execução falhou'}${when}` };
+  }
+  if (execution.outcome === 'conflito') {
+    return { tone: 'error', label: 'CONFLITO', detail: `${detail || 'pausa de outro operador'}${when}` };
+  }
+  if (execution.mode === 'active' && execution.applied) {
+    return { tone: 'active', label: 'AÇÃO ATIVA', detail: `${detail || 'aplicada'}${when}` };
+  }
+  if (execution.outcome === 'liberada') {
+    return { tone: 'ok', label: 'LIBERADA', detail: `${detail || 'recursos liberados'}${when}` };
+  }
+  if (!rule.enabled) {
+    return { tone: '', label: 'DESABILITADA', detail: `${detail || 'regra não executa'}${when}` };
+  }
+  return { tone: '', label: intentionState(intention?.state), detail: `${detail || 'sem execução recente'}${when}` };
+}
+
+function formatClock(timestamp) {
+  const parsed = new Date(timestamp);
+  return Number.isNaN(parsed.getTime())
+    ? ''
+    : parsed.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
 function actionName(action) {

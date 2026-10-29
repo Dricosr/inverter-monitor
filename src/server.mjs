@@ -51,9 +51,10 @@ app.use((error, request, response, next) => {
 
 const server = app.listen(config.port, config.host, () => {
   console.log(`Inverter monitor UI: http://0.0.0.0:${config.port}`);
+  automationService.start();
 });
 
 server.on('error', (error) => {
   console.error(`Inverter monitor UI: nao foi possivel ouvir na porta ${config.port}: ${error.message}`);
-  process.exitCode = 1;
+  process.exit(1);
 });

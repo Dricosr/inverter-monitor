@@ -16,14 +16,24 @@ export class AiNodeMiningActionExecutor {
     const currentMode = stdout.includes('mode=ai') ? 'active' : 'inactive';
     const requestedMode = target === 'active' ? 'active' : 'inactive';
     if (currentMode === requestedMode && (target !== 'active' || this.#quotaFromStatus(stdout) === this.#quota(desiredIntensity))) {
-      return { changed: false, detail: target === 'active' ? `CPUQuota ja limitada a ${this.#quota(desiredIntensity)}%` : 'mineracao ja liberada' };
+      return {
+        changed: false,
+        applied: target === 'active',
+        owned: target === 'active',
+        detail: target === 'active' ? `CPUQuota ja limitada a ${this.#quota(desiredIntensity)}%` : 'mineracao ja liberada',
+      };
     }
     await execute(
       'ssh',
       ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=8', 'ai-node', command],
       { windowsHide: true, timeout: 30_000 },
     );
-    return { changed: true, detail: target === 'active' ? `CPUQuota limitada a ${this.#quota(desiredIntensity)}%` : 'mineracao liberada' };
+    return {
+      changed: true,
+      applied: target === 'active',
+      owned: target === 'active',
+      detail: target === 'active' ? `CPUQuota limitada a ${this.#quota(desiredIntensity)}%` : 'mineracao liberada',
+    };
   }
 
   #quota(desiredIntensity) {

@@ -17,8 +17,17 @@ $settings.Hidden = $true
 
 $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 if ($existing) {
+    Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
 }
+
+# O node sobrevive ao stop do agendador e continuaria dono da porta; sem isto a nova
+# instancia falha no bind e a antiga segue aplicando acoes em paralelo.
+Get-NetTCPConnection -LocalPort 3071 -State Listen -ErrorAction SilentlyContinue |
+    Select-Object -ExpandProperty OwningProcess -Unique |
+    ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
+Start-Sleep -Seconds 1
+
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger @($atStartup, $atLogon) -Principal $principal -Settings $settings
 Start-ScheduledTask -TaskName $TaskName
 

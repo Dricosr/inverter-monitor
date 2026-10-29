@@ -3,14 +3,56 @@ export class GateActionExecutor {
     this.baseUrl = baseUrl.replace(/\/$/, '');
   }
 
-  async apply(target) {
-    const status = await this.#request('/v1/status');
-    const paused = status?.gate?.paused === true || status?.paused === true;
-    const shouldPause = target === 'active';
-    if (paused === shouldPause) return { changed: false, detail: shouldPause ? 'fila ja pausada' : 'fila ja executando' };
+  async apply(target, _desiredIntensity, context = {}) {
+    const status = await this.#status();
+    const gate = status?.gate ?? {};
+    const paused = gate.paused === true;
 
-    await this.#request(shouldPause ? '/v1/admin/pausar' : '/v1/admin/retomar', 'POST');
-    return { changed: true, detail: shouldPause ? 'fila pausada' : 'fila retomada' };
+    if (target === 'active') {
+      if (paused) {
+        return {
+          changed: false,
+          applied: true,
+          owned: gate.pausedBy === 'manual',
+          detail: `fila ja pausada (${gate.pausedBy ?? 'origem desconhecida'})`,
+          pausedAt: gate.pausedAt ?? null,
+        };
+      }
+      await this.#request('/v1/admin/pausar', 'POST');
+      const after = await this.#status();
+      if (after?.gate?.paused !== true) throw new Error('Gate nao confirmou a pausa da fila');
+      return {
+        changed: true,
+        applied: true,
+        owned: true,
+        detail: 'fila pausada',
+        pausedAt: after.gate.pausedAt ?? null,
+      };
+    }
+
+    if (!paused) {
+      return { changed: false, applied: false, owned: false, detail: 'fila ja executando' };
+    }
+
+    const ownedAt = context?.previous?.pausedAt ?? null;
+    if (!ownedAt || gate.pausedAt !== ownedAt) {
+      return {
+        changed: false,
+        applied: false,
+        owned: false,
+        conflict: true,
+        detail: 'pausa criada por outro operador; nao retomando',
+      };
+    }
+
+    await this.#request('/v1/admin/retomar', 'POST');
+    const after = await this.#status();
+    if (after?.gate?.paused === true) throw new Error('Gate nao confirmou a retomada da fila');
+    return { changed: true, applied: false, owned: false, detail: 'fila retomada' };
+  }
+
+  async #status() {
+    return this.#request('/v1/status');
   }
 
   async #request(path, method = 'GET') {

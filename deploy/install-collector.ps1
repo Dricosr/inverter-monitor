@@ -17,8 +17,15 @@ $settings.Hidden = $true
 
 $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 if ($existing) {
+    Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
 }
+
+Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue |
+    Select-Object -ExpandProperty OwningProcess -Unique |
+    ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
+Start-Sleep -Seconds 1
+
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger @($atStartup, $atLogon) -Principal $principal -Settings $settings
 Start-ScheduledTask -TaskName $TaskName
 
