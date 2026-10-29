@@ -25,3 +25,11 @@ e versionamento [SemVer](https://semver.org/lang/pt-BR/).
 
 - Sem dependências externas; apenas a biblioteca padrão do Python 3.10+.
 - Somente leitura: nenhum registrador de configuração é escrito.
+## [Não lançado]
+
+- Interface web Node.js na porta 3071.
+- Painel de SOC, potência, bateria, PV, carga e integrações.
+- Cadastro de nomes amigáveis por inversor.
+- Regras com faixa de SOC, histerese, intensidade desejada e associação do SOC.
+- Avaliação de intenções com automação física bloqueada por segurança.
+- Implantação opcional como tarefa agendada do Windows.

@@ -1,6 +1,7 @@
 # ⚡ Monitor local dos inversores híbridos (LAN)
 
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+![Node.js](https://img.shields.io/badge/node.js-20%2B-5FA04E)
 ![Dependências](https://img.shields.io/badge/depend%C3%AAncias-nenhuma-brightgreen)
 ![Testes](https://img.shields.io/badge/testes-18%20passando-brightgreen)
 ![Licença](https://img.shields.io/badge/licen%C3%A7a-MIT-green)
@@ -29,6 +30,7 @@ inversor-106   Battery   SOC  41%   52.3V   905W / carga 12%
 - [O que foi descoberto na rede](#o-que-foi-descoberto-na-rede)
 - [Instalação](#instalação)
 - [Uso pela linha de comando](#uso-pela-linha-de-comando)
+- [Painel Node.js](#painel-nodejs)
 - [API HTTP](#api-http)
 - [Formato do JSON](#formato-do-json)
 - [Automação com histerese de SOC](#automação-com-histerese-de-soc)
@@ -88,6 +90,32 @@ escritório — e para isso não dá para depender de latência de nuvem nem de 
 
 O detalhamento — incluindo as armadilhas do CRC, o significado dos `fc` e os três mapas
 de registradores — está em **[docs/PROTOCOL.md](docs/PROTOCOL.md)**.
+
+## Painel Node.js
+
+O painel web em Node.js fica em **`http://127.0.0.1:3071`** e foi projetado para
+acompanhamento apenas. Ele não envia UDP aos dongles, não abre a porta `8899`, não
+mexe na nuvem dos inversores e não executa comandos no Gate ou nas mineradoras.
+
+```powershell
+cd D:\inverter-monitor
+npm install
+npm start
+```
+
+O painel lê `data/latest.json`, que continua sendo produzido pelo coletor Python.
+Portanto, ele nunca se torna um segundo coletor concorrente. Entre os recursos:
+
+- SOC, bateria, PV, carga, saída e temperatura por inversor;
+- nomes amigáveis persistidos em `data/dashboard.json`;
+- estado do Gate e das integrações EP2/ai-node quando disponíveis;
+- regras de SOC com ativação abaixo do limite e retorno acima da faixa de histerese;
+- associação explícita de cada regra a um inversor;
+- intensidade desejada para EP2 e ai-node, sem acionamento físico nesta versão.
+
+Execução física permanece bloqueada. A API informa `execution.enabled=false`, e
+todas as intenções exibem `executionEnabled=false` mesmo quando a faixa estiver
+atingida.
 
 ## O que foi descoberto na rede
 
