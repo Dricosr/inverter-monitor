@@ -5,13 +5,15 @@ import { RuleEngine } from '../domain/ruleEngine.mjs';
 import { createIntegrationStatusService } from './integrationStatus.service.mjs';
 
 export class DashboardService {
-  constructor({ devicesFile, snapshotFile, collectorUrl, dashboardFile, gateUrl, ep2XmrigUrl, ep2XmrigConfig, ep2XmrigToken }) {
+  constructor({ devicesFile, snapshotFile, collectorUrl, dashboardFile, gateUrl, ep2XmrigUrl, ep2XmrigConfig, ep2XmrigToken, automationEnabled = false, automationService = null }) {
     this.devicesFile = devicesFile;
     this.snapshotFile = snapshotFile;
     this.collectorUrl = collectorUrl;
     this.normalizer = new StatusNormalizer();
     this.ruleEngine = new RuleEngine();
     this.store = new JsonStore(dashboardFile, this.#defaultDashboard());
+    this.automationEnabled = automationEnabled;
+    this.automationService = automationService;
     this.integrations = createIntegrationStatusService({ gateUrl, ep2XmrigUrl, ep2XmrigConfig, ep2XmrigToken });
   }
 
@@ -38,7 +40,7 @@ export class DashboardService {
     }
     const devices = this.normalizer.normalize(snapshotJson, devicesConfig);
     const rules = Array.isArray(userSettings.rules) ? userSettings.rules : [];
-    const intentions = this.ruleEngine.evaluateAll(rules, devices);
+    const intentions = this.ruleEngine.evaluateAll(rules, devices, this.automationEnabled);
 
     return {
       snapshotTimestamp: snapshotJson.timestamp ?? null,
@@ -48,7 +50,11 @@ export class DashboardService {
         configuredSnapshot: this.snapshotFile,
         staleAfterSeconds: 120,
       },
-      execution: { enabled: false, reason: 'Automacao fisica desativada nesta versao' },
+      execution: {
+        enabled: this.automationEnabled,
+        reason: this.automationEnabled ? 'Automacao fisica habilitada' : 'Automacao fisica desativada',
+        actions: await this.#executionActions(rules),
+      },
       devices,
       rules,
       intentions,
@@ -84,6 +90,15 @@ export class DashboardService {
     await this.store.write(settings);
   }
 
+  async #executionActions(rules) {
+    if (!this.automationService) return {};
+    const status = await this.automationService.getStatus();
+    return Object.fromEntries(rules.map((rule) => [
+      rule.id,
+      status[rule.id] ?? { state: rule.enabled ? 'aguardando' : 'desabilitada' },
+    ]));
+  }
+
   #age(timestamp) {
     if (!timestamp) return null;
     const parsed = Date.parse(timestamp);
@@ -102,8 +117,8 @@ export class DashboardService {
         enabled: false,
         action: 'gate_pause',
         sourceDeviceId: 'anenji-6k2',
-        activateBelow: 50,
-        resumeAbove: 55,
+        activateBelow: 69,
+        resumeAbove: 70,
         desiredIntensity: null,
       },
       {
@@ -112,8 +127,8 @@ export class DashboardService {
         enabled: false,
         action: 'ep2_mining_reduce',
         sourceDeviceId: 'anenji-6k2',
-        activateBelow: 50,
-        resumeAbove: 55,
+        activateBelow: 69,
+        resumeAbove: 70,
         desiredIntensity: 25,
       },
       {

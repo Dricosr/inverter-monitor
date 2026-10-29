@@ -8,10 +8,10 @@ test('ativa uma regra abaixo do limite', () => {
   const result = new RuleEngine().evaluate({
     id: 'gate', enabled: true, action: 'gate_pause',
     sourceDeviceId: 'main', activateBelow: 50, resumeAbove: 55,
-  }, devices);
+  }, devices, true);
   assert.equal(result.state, 'active');
   assert.equal(result.wouldExecute, true);
-  assert.equal(result.executionEnabled, false);
+  assert.equal(result.executionEnabled, true);
 });
 
 test('mantem histerese entre os limites', () => {

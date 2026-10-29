@@ -3,8 +3,24 @@ import path from 'node:path';
 import { config, rootDir } from './config.mjs';
 import { DashboardService } from './services/dashboard.service.mjs';
 import { createDashboardRouter } from './routes/dashboard.routes.mjs';
+import { createAutomationService } from './services/automation/automationService.mjs';
 
 const app = express();
+const automationService = createAutomationService({
+  enabled: config.automationEnabled,
+  stateFile: config.automationStateFile,
+  dashboardFile: config.dashboardFile,
+  devicesFile: config.devicesFile,
+  snapshotFile: config.snapshotFile,
+  collectorUrl: config.collectorUrl,
+  pollMs: config.pollMs,
+  gateUrl: config.gateUrl,
+  ep2XmrigUrl: config.ep2XmrigUrl,
+  ep2XmrigConfig: config.ep2XmrigConfig,
+  ep2XmrigToken: config.ep2XmrigToken,
+  ep2BaseThreads: config.ep2MiningBaseThreads,
+});
+
 const dashboardService = new DashboardService({
   devicesFile: config.devicesFile,
   snapshotFile: config.snapshotFile,
@@ -14,12 +30,14 @@ const dashboardService = new DashboardService({
   ep2XmrigUrl: config.ep2XmrigUrl,
   ep2XmrigConfig: config.ep2XmrigConfig,
   ep2XmrigToken: config.ep2XmrigToken,
+  automationEnabled: config.automationEnabled,
+  automationService,
 });
 
 app.disable('x-powered-by');
 app.use(express.json({ limit: '64kb' }));
 app.use(express.static(path.join(rootDir, 'public')));
-app.get('/health', (request, response) => response.json({ ok: true, port: config.port, automationEnabled: false }));
+app.get('/health', (request, response) => response.json({ ok: true, port: config.port, automationEnabled: config.automationEnabled }));
 app.use('/api', createDashboardRouter(dashboardService));
 app.use((request, response, next) => {
   if (request.path.startsWith('/api/')) return next();

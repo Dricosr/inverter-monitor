@@ -1,8 +1,8 @@
 export class RuleEngine {
-  evaluate(rule, devices) {
+  evaluate(rule, devices, executionEnabled = false) {
     const source = devices.find((device) => device.id === rule.sourceDeviceId);
     if (!rule.enabled || !source || !Number.isFinite(source.soc)) {
-      return this.#result(rule, source, null, 'indeterminate');
+      return this.#result(rule, source, null, 'indeterminate', executionEnabled);
     }
 
     const soc = source.soc;
@@ -10,19 +10,19 @@ export class RuleEngine {
     const resumeAbove = this.#clamp(rule.resumeAbove ?? 55, 0, 100);
 
     if (soc < activateBelow) {
-      return this.#result(rule, source, soc, 'active');
+      return this.#result(rule, source, soc, 'active', executionEnabled);
     }
     if (soc >= resumeAbove) {
-      return this.#result(rule, source, soc, 'inactive');
+      return this.#result(rule, source, soc, 'inactive', executionEnabled);
     }
-    return this.#result(rule, source, soc, 'hysteresis');
+    return this.#result(rule, source, soc, 'hysteresis', executionEnabled);
   }
 
-  evaluateAll(rules, devices) {
-    return rules.map((rule) => this.evaluate(rule, devices));
+  evaluateAll(rules, devices, executionEnabled = false) {
+    return rules.map((rule) => this.evaluate(rule, devices, executionEnabled));
   }
 
-  #result(rule, source, soc, state) {
+  #result(rule, source, soc, state, executionEnabled) {
     return {
       ruleId: rule.id,
       action: rule.action,
@@ -32,8 +32,8 @@ export class RuleEngine {
       sourceSoc: soc,
       state,
       desiredIntensity: rule.desiredIntensity ?? null,
-      executionEnabled: false,
-      wouldExecute: rule.enabled === true && state === 'active',
+      executionEnabled,
+      wouldExecute: rule.enabled === true && executionEnabled && state === 'active',
     };
   }
 

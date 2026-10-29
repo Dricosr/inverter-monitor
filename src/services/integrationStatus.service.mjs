@@ -66,7 +66,11 @@ async function ep2MiningStatus(baseUrl, configPath, configuredToken) {
     return { online: false, error: `configuracao XMRig indisponivel: ${error.message}` };
   }
   try {
-    const summary = await jsonRequest(`${baseUrl}/2/summary`, 2500, token ? { Authorization: `Bearer ${token}` } : {});
+    const summary = await jsonRequest(
+      `${baseUrl}/2/summary`,
+      2500,
+      token ? { Authorization: `Bearer ${token}` } : {},
+    );
     return {
       online: true,
       hashrate: summary?.hashrate?.total?.[0] ?? summary?.hashrate?.total ?? null,

@@ -261,7 +261,7 @@ Cada dispositivo é um objeto. Campos com `*` dependem do protocolo.
 
 Um exemplo real e completo está em [`examples/sample-output.json`](examples/sample-output.json).
 
-## Automação com histerese de SOC
+## Automação de cargas com histerese de SOC
 
 Em `devices.json`, cada inversor aceita `soc_on` e `soc_off`. A saída passa a incluir:
 
@@ -280,9 +280,21 @@ Em `devices.json`, cada inversor aceita `soc_on` e `soc_off`. A saída passa a i
 | `soc <= soc_off` | `false` |
 | entre os dois | mantém o estado anterior (histerese) |
 
-A histerese evita o liga/desliga oscilando quando o SOC fica na borda. O programa
-**não aciona nada sozinho** — apenas informa a decisão; quem controla o relé é o seu
-script, Node-RED ou Home Assistant.
+A histerese evita o liga/desliga oscilando quando o SOC fica na borda.
+
+Além dessa decisão usada pela API Python, o painel Node.js possui automação física
+independente para três ações configuradas pela interface:
+
+| Ação | Estado ativo | Estado normal |
+| --- | --- | --- |
+| Gate | `POST /v1/admin/pausar` | `POST /v1/admin/retomar` |
+| EP2 | XMRig reiniciado com threads proporcionais à intensidade reduzida | restaura 30 threads |
+| ai-node | `ainode-mining-mode ai <percentual>` via SSH autorizado | `ainode-mining-mode normal` |
+
+Cada regra escolhe seu próprio inversor de referência, limiares de ativação e
+retomada e intensidade reduzida. O executor mantém estado persistido e verifica o
+estado real antes de enviar a ação; falhas em uma regra não interrompem as demais.
+Gate não é alterado por este projeto.
 
 ## Integração com outros sistemas
 

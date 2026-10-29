@@ -187,11 +187,13 @@ function renderRules(rules, intentions, devices) {
     const intention = intentions.find((item) => item.ruleId === rule.id);
     const source = devices.find((device) => device.id === rule.sourceDeviceId);
     const active = intention?.wouldExecute;
+    const execution = state.dashboard.execution.actions?.[rule.id] ?? {};
     return `<article class="rule-card">
       <div><h3>${escapeHtml(rule.name)}</h3><small>${escapeHtml(actionName(rule.action))}</small></div>
       <div><small>Referência</small><strong>${escapeHtml(source?.name || rule.sourceDeviceId)}</strong></div>
       <div><small>Faixa SOC</small><strong>${rule.activateBelow}% a ${rule.resumeAbove}%</strong></div>
-      <div class="rule-state ${active ? 'active' : ''}">${active ? 'INTENÇÃO ATIVA · não executada' : intentionState(intention?.state)}</div>
+      <div class="rule-state ${active ? 'active' : ''}">${active ? 'AÇÃO ATIVA' : intentionState(intention?.state)}</div>
+      <div class="execution-state"><small>Execução</small><strong>${escapeHtml(execution.detail?.detail ?? execution.detail ?? execution.outcome ?? 'aguardando')}</strong></div>
       <div class="rule-actions">
         <button class="button secondary" data-edit-rule="${escapeHtml(rule.id)}">Editar</button>
         <button class="button danger" data-delete-rule="${escapeHtml(rule.id)}">Excluir</button>

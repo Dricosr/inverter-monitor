@@ -4,6 +4,7 @@ __pycache__/
 data/latest.json
 data/dashboard.json
 data/intents.json
+data/automation-state.json
 node_modules/
 logs/
 *.log

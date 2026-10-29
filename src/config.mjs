@@ -21,4 +21,7 @@ export const config = {
   ep2XmrigUrl: process.env.EP2_XMRIG_URL || 'http://127.0.0.1:18092',
   ep2XmrigConfig: process.env.EP2_XMRIG_CONFIG || String.raw`D:\Monero\xmrig\config.json`,
   ep2XmrigToken: process.env.EP2_XMRIG_TOKEN || '',
+  automationEnabled: (process.env.AUTOMATION_ENABLED ?? 'true').toLowerCase() !== 'false',
+  automationStateFile: process.env.AUTOMATION_STATE_FILE || path.join(rootDir, 'data', 'automation-state.json'),
+  ep2MiningBaseThreads: Number(process.env.EP2_MINING_BASE_THREADS || 30),
 };
