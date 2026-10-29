@@ -384,9 +384,11 @@ usando bytes capturados de equipamentos reais. Nenhum teste toca a rede.
 ## Limitações e efeitos colaterais
 
 - **O app oficial fica sem dados enquanto estamos conectados.** O dongle mantém uma
-  conexão por vez. Com `--interval 10` ele fica "preso" ao PC por ~3 s a cada 10 s; o app
-  mostra atraso nesse intervalo e volta ao normal depois. Para dar mais folga, use
-  `--interval 30` ou `60`.
+  conexão por vez. Com `--interval 15`, cada dongle fica conectado localmente apenas
+  durante uma leitura curta e o coletor aguarda `1,5 s` antes do próximo redirecionamento.
+  O app oficial pode mostrar atraso de alguns minutos e volta ao normal depois que o
+  dongle reconecta ao servidor da nuvem. Não há proxy permanente nem interceptacao DNS
+  neste modo, e o software só usa o redirecionamento temporario exigido pela leitura local.
 - **A porta 8899 é exclusiva.** Só um processo pode usá-la.
 - `inversor-59` não expõe modo de operação nem tensão de rede — o dongle dele não
   publica esses registradores.

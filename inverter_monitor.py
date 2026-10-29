@@ -52,6 +52,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 DONGLE_UDP_PORT = 58899
 LOCAL_TCP_PORT = 8899  # porta em que o dongle conecta de volta (fixa no firmware)
+CLOUD_RECOVERY_DELAY = 1.5
 
 __version__ = "1.0.0"
 
@@ -184,6 +185,7 @@ class Dongle:
                 self.sock.close()
             finally:
                 self.sock = None
+                time.sleep(CLOUD_RECOVERY_DELAY)
 
 
 # --------------------------------------------------------------------------- #
