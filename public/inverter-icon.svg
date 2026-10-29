@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Monitor de inversores">
+  <defs>
+    <linearGradient id="background" x1="8" y1="6" x2="56" y2="58" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#5ee6a8"/>
+      <stop offset="1" stop-color="#58c6d9"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="16" fill="#111923"/>
+  <rect x="4" y="4" width="56" height="56" rx="14" fill="url(#background)"/>
+  <rect x="18" y="17" width="28" height="34" rx="7" fill="none" stroke="#071016" stroke-width="3"/>
+  <path d="M24 17v-4h16v4" fill="none" stroke="#071016" stroke-width="3" stroke-linecap="round"/>
+  <path d="M34.5 21l-9 13h7l-3 9 10-14h-7l2-8z" fill="#071016"/>
+  <path d="M15 27h-3M52 27h-3M15 38h-3M52 38h-3" fill="none" stroke="#071016" stroke-width="2.5" stroke-linecap="round"/>
+</svg>
