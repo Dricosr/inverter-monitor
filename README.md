@@ -93,9 +93,9 @@ de registradores — está em **[docs/PROTOCOL.md](docs/PROTOCOL.md)**.
 
 ## Painel Node.js
 
-O painel web em Node.js fica em **`http://127.0.0.1:3071`** e foi projetado para
-acompanhamento apenas. Ele não envia UDP aos dongles, não abre a porta `8899`, não
-mexe na nuvem dos inversores e não executa comandos no Gate ou nas mineradoras.
+O painel web em Node.js fica em **`http://127.0.0.1:3071`**. A leitura dos inversores
+é passiva: ele não envia UDP aos dongles, não abre a porta `8899` e não mexe na nuvem.
+As ações automáticas atuam apenas na fila do Gate e nos mineradores EP2 e ai-node.
 
 ```powershell
 cd D:\inverter-monitor
@@ -108,17 +108,17 @@ O painel consulta primeiro o coletor ao vivo em `http://127.0.0.1:8080/status` e
 o arquivo apenas como fallback quando o serviço está indisponível.
 Portanto, ele nunca se torna um segundo coletor concorrente. Entre os recursos:
 
-- SOC, bateria, PV, carga, saída e temperatura por inversor;
-- timestamp e idade do último snapshot, indicando claramente quando o coletor parou;
+- chips no topo com leitura ao vivo/atrasada, tempo desde a última leitura, inversores
+  online e falhas de ação — todos com detalhe no tooltip;
+- cartão de automação na barra lateral mostrando quantas regras estão atuando;
+- SOC, tensão da bateria, PV, carga, saída e temperatura por inversor, com barra de
+  bateria colorida por faixa e aviso de bateria baixa abaixo de 30%;
 - nomes amigáveis persistidos em `data/dashboard.json`;
-- estado do Gate e das integrações EP2/ai-node quando disponíveis;
-- regras de SOC com ativação abaixo do limite e retorno acima da faixa de histerese;
-- associação explícita de cada regra a um inversor;
-- intensidade desejada para EP2 e ai-node, sem acionamento físico nesta versão.
-
-Execução física permanece bloqueada. A API informa `execution.enabled=false`, e
-todas as intenções exibem `executionEnabled=false` mesmo quando a faixa estiver
-atingida.
+- Fila do Gate (pausa e jobs na fila) e mineração EP2/ai-node com hash rate de agora,
+  1 min e 15 min;
+- regras por ação com limite de ligar/desligar, intensidade própria e chip de estado
+  (`Pausado`, `Reduzido`, `Normal`, `Liberada`, `Conflito`, `Falha`, `Desligada`);
+- último resultado de cada regra visível na linha, com o detalhe técnico no tooltip.
 
 ## Leituras ao vivo
 

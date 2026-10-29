@@ -113,7 +113,7 @@ export class DashboardService {
     return [
       {
         id: 'gate-low-battery',
-        name: 'Pausar Gate com bateria baixa',
+        name: 'Pausar a fila do Gate com bateria baixa',
         enabled: false,
         action: 'gate_pause',
         sourceDeviceId: 'anenji-6k2',
@@ -123,7 +123,7 @@ export class DashboardService {
       },
       {
         id: 'ep2-mining-low-battery',
-        name: 'Reduzir mineracao EP2',
+        name: 'Reduzir mineração da EP2',
         enabled: false,
         action: 'ep2_mining_reduce',
         sourceDeviceId: 'anenji-6k2',
@@ -133,7 +133,7 @@ export class DashboardService {
       },
       {
         id: 'ainode-mining-low-battery',
-        name: 'Reduzir mineracao ai-node',
+        name: 'Reduzir mineração do ai-node',
         enabled: false,
         action: 'ainode_mining_reduce',
         sourceDeviceId: 'anenji-6k2',

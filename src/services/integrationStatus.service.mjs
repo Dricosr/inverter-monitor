@@ -22,7 +22,13 @@ export function createIntegrationStatusService({ gateUrl, ep2XmrigUrl, ep2XmrigC
 async function gateStatus(baseUrl) {
   try {
     const value = await jsonRequest(`${baseUrl}/v1/status`);
-    return { online: true, paused: value?.gate?.paused === true || value?.paused === true };
+    const gate = value?.gate ?? {};
+    return {
+      online: true,
+      paused: gate.paused === true || value?.paused === true,
+      pausedBy: gate.pausedBy ?? null,
+      pending: Number.isFinite(gate.pending) ? gate.pending : null,
+    };
   } catch (error) {
     return { online: false, paused: null, error: error.message };
   }
@@ -73,10 +79,22 @@ async function ep2MiningStatus(baseUrl, configPath, configuredToken) {
     );
     return {
       online: true,
-      hashrate: summary?.hashrate?.total?.[0] ?? summary?.hashrate?.total ?? null,
+      ...normalizeEp2Hashrate(summary?.hashrate?.total),
       threads: summary?.connection?.threads ?? summary?.resources?.threads ?? null,
     };
   } catch (error) {
     return { online: false, error: error.message };
   }
+}
+
+export function normalizeEp2Hashrate(total) {
+  const windows = Array.isArray(total) ? total.map(Number) : [];
+  const usable = (value) => (Number.isFinite(value) && value >= 0 ? value : null);
+
+  return {
+    hashrate: usable(windows[0]),
+    hashrate10s: usable(windows[0]),
+    hashrate60s: usable(windows[1]),
+    hashrate15m: usable(windows[2]),
+  };
 }

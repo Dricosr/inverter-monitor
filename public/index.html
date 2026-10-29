@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Monitor dos inversores</title>
+  <title>Inversores · Monitor de energia</title>
   <link rel="icon" href="/inverter-icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/inverter-icon.svg">
   <link rel="stylesheet" href="/styles.css">
@@ -13,31 +13,31 @@
     <div class="brand">
       <img class="brand-mark" src="/inverter-icon.svg" alt="">
       <div>
-        <strong>Inverter</strong>
-        <small>Energy monitor</small>
+        <strong>Inversores</strong>
+        <small>Monitor de energia</small>
       </div>
     </div>
     <nav>
-      <button class="nav-item active" data-view="overview">Visao geral</button>
-      <button class="nav-item" data-view="rules">Regras e intenções</button>
+      <button class="nav-item active" data-view="overview">Visão geral</button>
+      <button class="nav-item" data-view="rules">Ações automáticas</button>
     </nav>
-    <div class="safety-card">
-      <span class="safety-dot"></span>
-      <div>
-        <strong>Modo seguro</strong>
-        <small>Automação física por regras SOC</small>
+    <div id="automation-card" class="automation-card off">
+      <span class="automation-dot"></span>
+      <div class="automation-text">
+        <strong id="automation-title">Automação</strong>
+        <small id="automation-detail">Verificando…</small>
       </div>
     </div>
   </aside>
 
   <main>
     <header>
-      <div>
+      <div class="title-block">
         <p class="eyebrow">ESTAÇÃO DE ENERGIA</p>
         <h1>Inversores</h1>
       </div>
       <div class="header-actions">
-        <div id="snapshot-age" class="age-badge">Lendo snapshot...</div>
+        <div id="status-chips" class="chip-row" aria-live="polite"></div>
         <button id="refresh-button" class="button secondary">Atualizar</button>
       </div>
     </header>
@@ -45,16 +45,19 @@
     <section id="overview-view" class="view active">
       <div id="summary" class="summary-grid"></div>
       <div id="devices" class="device-grid"></div>
+
       <div class="section-heading">
         <div>
           <p class="eyebrow">SISTEMAS DA REDE</p>
           <h2>Integrações</h2>
         </div>
+        <span class="section-hint">Gate e mineradores, ao vivo</span>
       </div>
       <div id="integrations" class="integration-grid"></div>
+
       <div class="notice">
-        <strong>Leitura sem intervenção na nuvem</strong>
-        <span>O painel consulta apenas o snapshot gravado pelo coletor. Nenhuma ação é enviada aos inversores.</span>
+        <strong>Leitura passiva dos inversores</strong>
+        <span>Nada é enviado aos inversores. As ações automáticas atuam apenas na fila do Gate e nos mineradores EP2 e ai-node.</span>
       </div>
     </section>
 
@@ -62,13 +65,13 @@
       <div class="section-heading">
         <div>
           <p class="eyebrow">POLÍTICA DE ENERGIA</p>
-          <h2>Regras e intenções</h2>
+          <h2>Ações automáticas</h2>
         </div>
         <button id="new-rule-button" class="button primary">Nova regra</button>
       </div>
-      <div class="notice warning">
-        <strong>Execução independente por ação</strong>
-        <span>Gate, EP2 e ai-node possuem faixas SOC próprias. A ativação só ocorre quando a regra estiver habilitada.</span>
+      <div class="notice">
+        <strong>Como funciona</strong>
+        <span>Abaixo do limite a ação liga; acima do limite de desligar ela volta ao normal. Entre os dois, fica como está.</span>
       </div>
       <div id="rules" class="rules-list"></div>
     </section>
@@ -76,10 +79,10 @@
 
   <dialog id="device-dialog">
     <form method="dialog" id="device-form">
-      <h2>Nome do inversor</h2>
-      <p>O nome amigavel nao altera o ID tecnico nem o protocolo.</p>
-      <label>ID técnico<input id="device-id" name="id" readonly></label>
-      <label>Nome exibido<input id="device-name" name="displayName" maxlength="80" required></label>
+      <h2>Renomear inversor</h2>
+      <p class="dialog-sub">O nome aparece só no painel; a leitura continua igual.</p>
+      <label>ID na sonda<input id="device-id" name="id" readonly></label>
+      <label>Nome no painel<input id="device-name" name="displayName" maxlength="80" required></label>
       <div class="dialog-actions">
         <button class="button secondary" value="cancel">Cancelar</button>
         <button class="button primary" id="device-save" value="default">Salvar nome</button>
@@ -89,25 +92,27 @@
 
   <dialog id="rule-dialog">
     <form method="dialog" id="rule-form">
-      <h2>Configurar intenção</h2>
+      <h2 id="rule-dialog-title">Nova regra</h2>
+      <p class="dialog-sub">Uma ação por regra, disparada pelo SOC de um inversor.</p>
       <input type="hidden" id="rule-id">
-      <label>Nome<input id="rule-name" maxlength="120" required></label>
-      <label>Inversor de referência
-        <select id="rule-source" required></select>
-      </label>
-      <label>Atividade
+      <label>Nome da regra<input id="rule-name" maxlength="120" required></label>
+      <label>Inversor de referência<select id="rule-source" required></select></label>
+      <label>O que fazer
         <select id="rule-action">
-          <option value="gate_pause">Pausar fila do Gate</option>
-          <option value="ep2_mining_reduce">Reduzir mineracao EP2</option>
-          <option value="ainode_mining_reduce">Reduzir mineracao ai-node</option>
+          <option value="gate_pause">Pausar a fila do Gate</option>
+          <option value="ep2_mining_reduce">Reduzir mineração da EP2</option>
+          <option value="ainode_mining_reduce">Reduzir mineração do ai-node</option>
         </select>
       </label>
+      <div id="rule-hint" class="hint"></div>
       <div class="form-grid">
-        <label>Ativar abaixo de (%)<input id="rule-activate" type="number" min="0" max="100" required></label>
-        <label>Retomar acima de (%)<input id="rule-resume" type="number" min="0" max="100" required></label>
-        <label>Intensidade reduzida (%)<input id="rule-intensity" type="number" min="0" max="100"></label>
+        <label>Ligar abaixo de (%)<input id="rule-activate" type="number" min="0" max="100" required></label>
+        <label>Desligar acima de (%)<input id="rule-resume" type="number" min="0" max="100" required></label>
+        <label id="rule-intensity-field">Intensidade (% do máximo)<input id="rule-intensity" type="number" min="1" max="100"></label>
       </div>
-      <label class="checkbox"><input id="rule-enabled" type="checkbox"> Regra habilitada para avaliação</label>
+      <p id="rule-preview" class="field-hint"></p>
+      <p id="rule-error" class="field-error" role="alert"></p>
+      <label class="checkbox"><input id="rule-enabled" type="checkbox"> Regra ativa</label>
       <div class="dialog-actions">
         <button class="button secondary" value="cancel">Cancelar</button>
         <button class="button primary" id="rule-save" value="default">Salvar regra</button>

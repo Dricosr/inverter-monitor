@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { normalizeAiNodeHashrate } from '../src/services/integrationStatus.service.mjs';
+import { normalizeAiNodeHashrate, normalizeEp2Hashrate } from '../src/services/integrationStatus.service.mjs';
 
 test('normaliza hashrate nested do Gate ai-node', () => {
   const normalized = normalizeAiNodeHashrate({
@@ -24,6 +24,24 @@ test('mantem compatibilidade com resposta escalar antiga', () => {
   assert.deepEqual(normalizeAiNodeHashrate({ hashrate: 9000 }), {
     hashrate: 9000,
     hashrate10s: 9000,
+    hashrate60s: null,
+    hashrate15m: null,
+  });
+});
+
+test('normaliza as janelas de hashrate da EP2', () => {
+  assert.deepEqual(normalizeEp2Hashrate([7970.35, 7940.5, 8017.73]), {
+    hashrate: 7970.35,
+    hashrate10s: 7970.35,
+    hashrate60s: 7940.5,
+    hashrate15m: 8017.73,
+  });
+});
+
+test('EP2 sem hashrate nao inventa valores', () => {
+  assert.deepEqual(normalizeEp2Hashrate(null), {
+    hashrate: null,
+    hashrate10s: null,
     hashrate60s: null,
     hashrate15m: null,
   });
