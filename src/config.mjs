@@ -14,6 +14,7 @@ export const config = {
   host: process.env.HOST || '0.0.0.0',
   devicesFile: process.env.INVERTER_DEVICES_FILE || path.join(rootDir, 'devices.json'),
   snapshotFile: process.env.INVERTER_SNAPSHOT_FILE || path.join(rootDir, 'data', 'latest.json'),
+  collectorUrl: process.env.INVERTER_COLLECTOR_URL || 'http://127.0.0.1:8080/status',
   dashboardFile: process.env.INVERTER_DASHBOARD_FILE || path.join(rootDir, 'data', 'dashboard.json'),
   pollMs: numberFromEnv('DASHBOARD_POLL_MS', 10_000),
   gateUrl: process.env.GATE_BASE_URL || 'http://192.168.18.150:3070',

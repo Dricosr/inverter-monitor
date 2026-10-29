@@ -5,9 +5,10 @@ import { RuleEngine } from '../domain/ruleEngine.mjs';
 import { createIntegrationStatusService } from './integrationStatus.service.mjs';
 
 export class DashboardService {
-  constructor({ devicesFile, snapshotFile, dashboardFile, gateUrl, ep2XmrigUrl, ep2XmrigConfig, ep2XmrigToken }) {
+  constructor({ devicesFile, snapshotFile, collectorUrl, dashboardFile, gateUrl, ep2XmrigUrl, ep2XmrigConfig, ep2XmrigToken }) {
     this.devicesFile = devicesFile;
     this.snapshotFile = snapshotFile;
+    this.collectorUrl = collectorUrl;
     this.normalizer = new StatusNormalizer();
     this.ruleEngine = new RuleEngine();
     this.store = new JsonStore(dashboardFile, this.#defaultDashboard());
@@ -25,7 +26,16 @@ export class DashboardService {
       const saved = userSettings.devices?.find((item) => item.id === device.name);
       return saved ? { ...device, displayName: saved.displayName } : device;
     });
-    const snapshotJson = typeof snapshot === 'string' ? JSON.parse(snapshot || '{}') : snapshot;
+    let snapshotJson;
+    let collectorSource = 'snapshot_file';
+    try {
+      const response = await fetch(this.collectorUrl, { signal: AbortSignal.timeout(3000) });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      snapshotJson = await response.json();
+      collectorSource = 'collector_api';
+    } catch (error) {
+      snapshotJson = typeof snapshot === 'string' ? JSON.parse(snapshot || '{}') : snapshot;
+    }
     const devices = this.normalizer.normalize(snapshotJson, devicesConfig);
     const rules = Array.isArray(userSettings.rules) ? userSettings.rules : [];
     const intentions = this.ruleEngine.evaluateAll(rules, devices);
@@ -33,6 +43,7 @@ export class DashboardService {
     return {
       snapshotTimestamp: snapshotJson.timestamp ?? null,
       snapshotAgeSeconds: this.#age(snapshotJson.timestamp),
+      collectorSource,
       collector: {
         configuredSnapshot: this.snapshotFile,
         staleAfterSeconds: 120,

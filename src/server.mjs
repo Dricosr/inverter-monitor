@@ -8,6 +8,7 @@ const app = express();
 const dashboardService = new DashboardService({
   devicesFile: config.devicesFile,
   snapshotFile: config.snapshotFile,
+  collectorUrl: config.collectorUrl,
   dashboardFile: config.dashboardFile,
   gateUrl: config.gateUrl,
   ep2XmrigUrl: config.ep2XmrigUrl,

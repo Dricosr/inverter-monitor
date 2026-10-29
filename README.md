@@ -104,6 +104,8 @@ npm start
 ```
 
 O painel lê `data/latest.json`, que continua sendo produzido pelo coletor Python.
+O painel consulta primeiro o coletor ao vivo em `http://127.0.0.1:8080/status` e usa
+o arquivo apenas como fallback quando o serviço está indisponível.
 Portanto, ele nunca se torna um segundo coletor concorrente. Entre os recursos:
 
 - SOC, bateria, PV, carga, saída e temperatura por inversor;
@@ -117,6 +119,12 @@ Portanto, ele nunca se torna um segundo coletor concorrente. Entre os recursos:
 Execução física permanece bloqueada. A API informa `execution.enabled=false`, e
 todas as intenções exibem `executionEnabled=false` mesmo quando a faixa estiver
 atingida.
+
+## Leituras ao vivo
+
+O coletor publica novos snapshots a cada 15 segundos em
+`http://127.0.0.1:8080/status`. A UI consulta essa API diretamente a cada 10 segundos.
+O arquivo `data/latest.json` é usado somente como fallback temporário.
 
 ## O que foi descoberto na rede
 

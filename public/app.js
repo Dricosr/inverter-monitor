@@ -67,7 +67,8 @@ function renderAge(dashboard) {
     elements.age.textContent = 'Sem timestamp no snapshot';
   } else if (age <= dashboard.collector.staleAfterSeconds) {
     elements.age.classList.add('online');
-    elements.age.textContent = `Ultimo snapshot ${timestamp} · ha ${formatAge(age)}`;
+    const source = dashboard.collectorSource === 'collector_api' ? 'AO VIVO' : 'snapshot local';
+    elements.age.textContent = `${source} · ultimo snapshot ${timestamp} · ha ${formatAge(age)}`;
   } else {
     elements.age.classList.add('stale');
     elements.age.textContent = `Ultimo snapshot ${timestamp} · antigo ha ${formatAge(age)}`;
