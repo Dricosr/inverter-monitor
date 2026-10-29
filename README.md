@@ -113,6 +113,8 @@ Portanto, ele nunca se torna um segundo coletor concorrente. Entre os recursos:
 - cartão de automação na barra lateral mostrando quantas regras estão atuando;
 - SOC, tensão da bateria, PV, carga, saída e temperatura por inversor, com barra de
   bateria colorida por faixa e aviso de bateria baixa abaixo de 30%;
+- potência solar calculada por `V × I` quando o inversor só informa tensão e corrente
+  (PI30) ou quando as duas entradas PV são conhecidas (mapa B);
 - nomes amigáveis persistidos em `data/dashboard.json`;
 - Fila do Gate (pausa e jobs na fila) e mineração EP2/ai-node com hash rate de agora,
   1 min e 15 min;

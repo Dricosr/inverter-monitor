@@ -187,6 +187,9 @@ Usado por `.59`. A bateria fica num bloco diferente:
 
 | Reg | Campo | Escala |
 | --- | --- | --- |
+| 200 | Identificador do mapa (`0xB000` nos dois Anenji) | — |
+| **201** | **Modo/estado** | enum igual ao mapa A (`3` = Off-Grid) |
+| 202 | Tensão da rede | ÷10 V (`0` = sem rede) |
 | 203 | Frequência da rede | ÷100 Hz |
 | 252 | Corrente de saída | ÷10 A |
 | 253 | Frequência de saída | ÷100 Hz |
@@ -199,8 +202,37 @@ Usado por `.59`. A bateria fica num bloco diferente:
 | 281 | Temperatura do módulo DC | °C |
 | 305 | Temperatura do módulo PV | °C |
 | 342 | Tensão de saída | ÷10 V |
+| **343** | **Temperatura do inversor** | °C (signed) |
+| **350** | **Carga do inversor** | % da potência nominal |
 | 351 | Tensão PV1 | ÷10 V |
+| 352 | Corrente PV1 | ÷10 A ⚠️ inferido |
 | 389 | Tensão PV2 | ÷10 V |
+| 390 | Corrente PV2 | ÷10 A ⚠️ inferido |
+| **691** | **Potência nominal** | W (`11000` no `.59`) |
+
+A potência PV é calculada por `V × I` (soma dos dois MPPTs), com descarte de valores
+implausíveis (tensão > 600 V ou corrente > 60 A).
+
+> ⚠️ **Corrente PV ainda não confirmada em produção.** À noite os registradores 352 e
+> 390 valem zero, então a posição foi inferida por adjacência (351/352 e 389/390 são
+> pares tensão/corrente). A primeira leitura com geração solar deve ser conferida
+> contra o display do inversor; se a escala estiver errada, ajuste `_scaled(..., 10)`
+> em `read_modbus_b`.
+
+### Como esses campos foram descobertos
+
+Varredura de leitura pura (`fc=3`) nos registradores 0–719 do `.59`, correlacionando
+com os valores já conhecidos: bateria 52,1 V/54 %/-255 W, saída 240,0 V/1,4 A/195 W e
+PV 25,9 V. Os blocos encontrados casaram com a leitura instantânea:
+
+```
+pares (tensão, corrente) 351/352 e 389/390
+343 = 49–50 °C (sobe com a carga)      350 = 3 com 335 VA de 11 kW
+691 = 11000 (nominal, confirma o modelo)
+```
+
+O bloco 342–351 **não** tem o mesmo significado no mapa A: no `.33` esses registradores
+guardam ajustes (342=40, 343=20, 344=5500), por isso os offsets são tratados por mapa.
 
 ## 7. Pegadinha: dois mapas, mesmo dongle
 

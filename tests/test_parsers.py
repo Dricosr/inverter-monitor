@@ -105,6 +105,36 @@ class TestParseModbusB(unittest.TestCase):
         self.assertIsNone(d["grid"]["voltage"])
         self.assertIsNone(d["grid"]["frequency"])
 
+    def test_modo_temperatura_e_carga(self):
+        d = im.parse_modbus_b(self.BAT, self.OUT, self.GRID, self.AC, self.PV,
+                              status=[0xB000, 3], load_percent=[3])
+        self.assertEqual(d["mode"], "Off-Grid")
+        self.assertEqual(d["status_code"], 3)
+        self.assertEqual(d["temperature"]["inverter"], 49)
+        self.assertEqual(d["load_percent"], 3)
+
+    def test_sem_registradores_opcionais_nao_quebra(self):
+        d = im.parse_modbus_b(self.BAT, self.OUT, self.GRID, self.AC, self.PV)
+        self.assertIsNone(d["mode"])
+        self.assertIsNone(d["status_code"])
+        self.assertIsNone(d["load_percent"])
+
+    def test_potencia_pv_somando_as_duas_entradas(self):
+        pv = {"pv1": 25.6, "pv2": 24.6, "pv1_current": 2.0, "pv2_current": 1.0}
+        d = im.parse_modbus_b(self.BAT, self.OUT, self.GRID, self.AC, pv)
+        self.assertAlmostEqual(d["pv"]["current"], 3.0)
+        self.assertAlmostEqual(d["pv"]["power"], 75.8)  # 25.6*2 + 24.6*1
+
+    def test_potencia_pv_sem_corrente_fica_none(self):
+        d = im.parse_modbus_b(self.BAT, self.OUT, self.GRID, self.AC, self.PV)
+        self.assertIsNone(d["pv"]["power"])
+        self.assertIsNone(d["pv"]["current"])
+
+    def test_corrente_pv_implausivel_e_descartada(self):
+        pv = {"pv1": 25.6, "pv2": None, "pv1_current": 999.0, "pv2_current": None}
+        d = im.parse_modbus_b(self.BAT, self.OUT, self.GRID, self.AC, pv)
+        self.assertIsNone(d["pv"]["power"])
+
 
 class TestParsePi30(unittest.TestCase):
     """Resposta QPIGS real, com CRC e CR no fim."""
@@ -130,6 +160,19 @@ class TestParsePi30(unittest.TestCase):
     def test_resposta_invalida(self):
         with self.assertRaises(ValueError):
             im.parse_qpigs("(NAKss\r")
+
+    def test_potencia_pv_calculada(self):
+        raw = ("(000.0 00.0 231.3 60.0 1175 0983 013 414 52.20 000 040 0047 "
+               "02.5 320.0 52.20 00022 00010000 00 00 00000 010\xbe\xac\r")
+        d = im.parse_qpigs(raw, "B")
+        self.assertAlmostEqual(d["pv"]["voltage"], 320.0)
+        self.assertAlmostEqual(d["pv"]["current"], 2.5)
+        self.assertAlmostEqual(d["pv"]["power"], 800.0)
+
+    def test_potencia_da_bateria_calculada(self):
+        d = im.parse_qpigs(self.RAW, "B")
+        # 52.20 V * (0 A carga - 22 A descarga) = -1148.4 W
+        self.assertAlmostEqual(d["battery"]["power"], -1148.4)
 
     def test_campos_faltando_nao_quebram(self):
         d = im.parse_qpigs("(000.0 00.0 231.3 60.0\r")

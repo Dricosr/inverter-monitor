@@ -195,16 +195,55 @@ MODES_MODBUS_A = {
     0: "Power On", 1: "Standby", 2: "Mains", 3: "Off-Grid",
     4: "Bypass", 5: "Charging", 6: "Fault",
 }
+MODES_MODBUS_B = MODES_MODBUS_A  # registrador 201 responde com o mesmo enum nos dois mapas
 MODES_PI30 = {"L": "Line", "B": "Battery", "S": "Standby", "F": "Fault",
               "P": "Power On", "H": "Power Saving"}
 
 
+MODBUS_GAP = 0.05  # respiro entre requisicoes: o dongle descarta respostas se for atropelado
+
+
 def _modbus_block(link: Dongle, start: int, count: int, slave: int = 1) -> list[int]:
+    time.sleep(MODBUS_GAP)
     body = link.ask(4, rtu_read(slave, start, count))
     if len(body) < 5 or body[1] & 0x80:
         raise ValueError(f"resposta Modbus invalida: {body.hex(' ')}")
     n = body[2] // 2
     return [body[3 + i * 2] << 8 | body[4 + i * 2] for i in range(n)]
+
+
+def _required_block(link: Dongle, start: int, count: int, attempts: int = 2) -> list[int]:
+    """Bloco essencial: tenta de novo uma vez antes de derrubar a leitura inteira."""
+    for attempt in range(1, attempts + 1):
+        try:
+            return _modbus_block(link, start, count)
+        except Exception:
+            if attempt == attempts:
+                raise
+            time.sleep(0.15)
+    raise RuntimeError("inalcancavel")
+
+
+def _safe_block(link: Dongle, start: int, count: int) -> list[int]:
+    """Leitura opcional: um fabricante/firmware pode nao expor o registrador."""
+    try:
+        return _modbus_block(link, start, count)
+    except Exception as exc:
+        log.debug("bloco %d+%d indisponivel: %s", start, count, exc)
+        return []
+
+
+def _scaled(value: int | None, divisor: float) -> float | None:
+    return None if value is None else round(value / divisor, 1)
+
+
+def _pv_power(voltage: float | None, current: float | None) -> float | None:
+    """Potencia PV so existe quando tensao e corrente foram lidas de forma plausivel."""
+    if voltage is None or current is None:
+        return None
+    if not (0 <= voltage <= 600 and 0 <= current <= 60):
+        return None
+    return round(voltage * current, 1)
 
 
 def parse_modbus_a(r: list[int]) -> dict:
@@ -247,47 +286,80 @@ def read_modbus_a(link: Dongle) -> dict:
 
 
 def read_modbus_b(link: Dongle) -> dict:
-    """Mapa Anenji/Megarevo (bateria em 277-281, saida em 252-255)."""
-    bat = _modbus_block(link, 277, 5)
-    out = _modbus_block(link, 252, 4)
-    try:
-        grid = _modbus_block(link, 202, 2)
-    except Exception:
-        grid = [0, 0]
-    ac = _modbus_block(link, 342, 2)
-    pv = {}
-    for reg, key in ((351, "pv1"), (389, "pv2")):
-        try:
-            pv[key] = round(_modbus_block(link, reg, 1)[0] / 10, 1)
-        except Exception:
-            pv[key] = None
-    return parse_modbus_b(bat, out, grid, ac, pv)
+    """Mapa Anenji/Megarevo.
+
+    Blocos: bateria 277-281, saida 252-255, AC 342-343, cabecalho 200-203
+    (modo e rede) e 350-352 / 389-390 (carga e PV). Seis requisicoes no total.
+    """
+    bat = _required_block(link, 277, 5)
+    out = _required_block(link, 252, 4)
+    ac = _required_block(link, 342, 2)
+    head = _safe_block(link, 200, 4)
+    pv1 = _safe_block(link, 350, 3)
+    pv2 = _safe_block(link, 389, 2)
+    pv = {
+        "pv1": _scaled(pv1[1], 10) if len(pv1) > 1 else None,
+        "pv2": _scaled(pv2[0], 10) if pv2 else None,
+        "pv1_current": _scaled(pv1[2], 10) if len(pv1) > 2 else None,
+        "pv2_current": _scaled(pv2[1], 10) if len(pv2) > 1 else None,
+    }
+    return parse_modbus_b(
+        bat, out,
+        grid=head[2:4],
+        ac=ac,
+        pv=pv,
+        status=head[0:2],
+        load_percent=pv1[0:1],
+    )
 
 
 def parse_modbus_b(bat: list[int], out: list[int], grid: list[int],
-                   ac: list[int], pv: dict) -> dict:
+                   ac: list[int], pv: dict,
+                   status: list[int] | None = None,
+                   load_percent: list[int] | None = None) -> dict:
     """Decodifica os blocos do mapa Anenji/Megarevo."""
-    grid_v = round(s16(grid[0]) / 10, 1) if grid and grid[0] else None
+    status = status or []
+    load_percent = load_percent or []
+
+    grid_v = _scaled(s16(grid[0]), 10) if grid and grid[0] else None
     grid_f = round(s16(grid[1]) / 100, 2) if len(grid) > 1 and grid[1] else None
+    mode_code = status[1] if len(status) > 1 else None
+    temperature = s16(ac[1]) if len(ac) > 1 else None
+
+    pv1_v = pv.get("pv1")
+    pv2_v = pv.get("pv2")
+    pv1_i = pv.get("pv1_current")
+    pv2_i = pv.get("pv2_current")
+    powers = [p for p in (_pv_power(pv1_v, pv1_i), _pv_power(pv2_v, pv2_i)) if p is not None]
+    currents = [i for i in (pv1_i, pv2_i) if i is not None]
+
     return {
         "protocol": "modbus_b",
-        "mode": None,
+        "mode": None if mode_code is None else MODES_MODBUS_B.get(mode_code, f"desconhecido({mode_code})"),
+        "status_code": mode_code,
         "battery": {
             "soc": bat[3],
             "voltage": round(bat[0] / 10, 1),
             "current": round(s16(bat[1]) / 10, 1),
             "power": s16(bat[2]),
-            "temperature": bat[4],
+            "temperature": s16(bat[4]),
         },
-        "pv": {"voltage": pv.get("pv1"), "voltage2": pv.get("pv2")},
+        "pv": {
+            "voltage": pv1_v,
+            "voltage2": pv2_v,
+            "current": round(sum(currents), 1) if currents else None,
+            "power": round(sum(powers), 1) if powers else None,
+        },
         "grid": {"voltage": grid_v, "frequency": grid_f},
         "output": {
-            "voltage": round(ac[0] / 10, 1),
+            "voltage": round(ac[0] / 10, 1) if ac else None,
             "current": round(s16(out[0]) / 10, 1),
             "frequency": round(out[1] / 100, 2),
             "active_power": s16(out[2]),
             "apparent_power": s16(out[3]),
         },
+        "load_percent": load_percent[0] if load_percent else None,
+        "temperature": {"inverter": temperature},
     }
 
 
@@ -306,18 +378,27 @@ def parse_qpigs(raw: str, mode_letter: str = "?", serial: str | None = None) -> 
         except (IndexError, ValueError):
             return default
 
+    battery_voltage = num(8)
+    pv_voltage = num(13)
+    pv_current = num(12)
+
     return {
         "protocol": "pi30",
         "mode": MODES_PI30.get(mode_letter, mode_letter),
         "serial": serial,
         "battery": {
             "soc": int(num(10)),
-            "voltage": num(8),
+            "voltage": battery_voltage,
             "current_charge": num(9),
             "current_discharge": num(15),
+            "power": round(battery_voltage * (num(9) - num(15)), 1),
             "voltage_scc": num(14),
         },
-        "pv": {"voltage": num(13), "current": num(12)},
+        "pv": {
+            "voltage": pv_voltage,
+            "current": pv_current,
+            "power": _pv_power(round(pv_voltage, 1), round(pv_current, 1)),
+        },
         "grid": {"voltage": num(0), "frequency": num(1)},
         "output": {
             "voltage": num(2),
@@ -476,8 +557,25 @@ class Handler(BaseHTTPRequestHandler):
             self._send({"endpoints": ["/status", "/status/<nome>", "/health"]}, 404)
 
 
+class _HttpServer(ThreadingHTTPServer):
+    """Sem SO_REUSEADDR: no Windows ele permite varios binds na mesma porta e dois
+    coletores passariam a disputar o mesmo dongle. Aqui a segunda instancia falha."""
+
+    allow_reuse_address = False
+
+    def server_bind(self):
+        if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
 def start_http(port: int) -> None:
-    srv = ThreadingHTTPServer(("0.0.0.0", port), Handler)
+    try:
+        srv = _HttpServer(("0.0.0.0", port), Handler)
+    except OSError as exc:
+        raise SystemExit(
+            f"porta {port} ja esta em uso: outra instancia do coletor esta rodando ({exc})"
+        ) from exc
     threading.Thread(target=srv.serve_forever, daemon=True, name="http").start()
     log.info("HTTP em http://0.0.0.0:%d/status", port)
 
