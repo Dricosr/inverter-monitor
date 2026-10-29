@@ -107,6 +107,7 @@ O painel lê `data/latest.json`, que continua sendo produzido pelo coletor Pytho
 Portanto, ele nunca se torna um segundo coletor concorrente. Entre os recursos:
 
 - SOC, bateria, PV, carga, saída e temperatura por inversor;
+- timestamp e idade do último snapshot, indicando claramente quando o coletor parou;
 - nomes amigáveis persistidos em `data/dashboard.json`;
 - estado do Gate e das integrações EP2/ai-node quando disponíveis;
 - regras de SOC com ativação abaixo do limite e retorno acima da faixa de histerese;

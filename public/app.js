@@ -59,22 +59,40 @@ function render() {
 
 function renderAge(dashboard) {
   const age = dashboard.snapshotAgeSeconds;
+  const timestamp = dashboard.snapshotTimestamp
+    ? formatSnapshotTimestamp(dashboard.snapshotTimestamp)
+    : null;
   elements.age.className = 'age-badge';
   if (age == null) {
     elements.age.textContent = 'Sem timestamp no snapshot';
   } else if (age <= dashboard.collector.staleAfterSeconds) {
     elements.age.classList.add('online');
-    elements.age.textContent = `Snapshot atual · ${formatAge(age)}`;
+    elements.age.textContent = `Ultimo snapshot ${timestamp} · ha ${formatAge(age)}`;
   } else {
     elements.age.classList.add('stale');
-    elements.age.textContent = `Snapshot antigo · ${formatAge(age)}`;
+    elements.age.textContent = `Ultimo snapshot ${timestamp} · antigo ha ${formatAge(age)}`;
   }
+  elements.age.title = dashboard.snapshotTimestamp
+    ? `Timestamp original: ${dashboard.snapshotTimestamp}`
+    : 'O snapshot nao possui timestamp';
 }
 
 function formatAge(seconds) {
   if (seconds < 60) return `${seconds}s`;
   if (seconds < 3600) return `${Math.floor(seconds / 60)} min`;
   return `${Math.floor(seconds / 3600)} h`;
+}
+
+function formatSnapshotTimestamp(timestamp) {
+  const parsed = new Date(timestamp);
+  if (Number.isNaN(parsed.getTime())) return timestamp;
+  return parsed.toLocaleString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
 function renderSummary(dashboard) {
