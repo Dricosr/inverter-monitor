@@ -3,6 +3,62 @@
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 e versionamento [SemVer](https://semver.org/lang/pt-BR/).
 
+## [1.1.0] — 2026-10-29
+
+### Adicionado
+
+- **Painel web Node.js** na porta 3071: cartões por inversor, integrações ao vivo
+  (Gate, EP2 e ai-node) e automação por SOC, com chips de estado em todos os painéis
+  e ajuda contextual no formulário de regras.
+- **Automação física** com três ações independentes, cada uma com o seu próprio
+  inversor de referência, limites de ligar/desligar e intensidade: pausar a fila do
+  Gate, reduzir a mineração da EP2 e reduzir a mineração do ai-node.
+- Estado persistido por ação (`data/automation-state.json`): último resultado, histerese
+  que sobrevive a restart e liberação automática ao desabilitar ou excluir a regra.
+- Executores isolados por ação: falha em uma não interrompe as outras.
+- Posse da pausa do Gate por `pausedAt`: a automação nunca retoma uma pausa criada por
+  outra pessoa ou sistema; registra `conflito` e deixa a fila como está.
+- Ícone próprio do aplicativo (`public/inverter-icon.svg`).
+- Instalação como tarefa agendada oculta, no boot e no logon
+  (`deploy/install-collector.ps1`, `deploy/install-ui.ps1`).
+- Testes do painel (16) cobrindo independência das ações, histerese, liberação ao
+  desabilitar/excluir, isolamento de falhas, hidratação do estado e conflito de pausa.
+
+### Corrigido
+
+- **`.59` sem modo, carga, temperatura e PV.** O mapa B só lia tensões. Foram descobertos
+  e documentados os registradores 201 (modo), 343 (temperatura), 350 (carga),
+  351/352 e 389/390 (tensão/corrente PV) e 691 (potência nominal).
+- **Potência solar no `.106`.** O PI30 informa tensão e corrente separadas; a potência
+  agora é calculada (`V × I`), assim como a potência da bateria pela corrente líquida.
+- Leitura do mapa B agrupada em 6 blocos vizinhos, com respiro de 50 ms e retentativa,
+  para o dongle não descartar respostas.
+- A automação retomava a pausa do Gate a cada ciclo quando a regra estava em histerese.
+- Ações aplicadas não eram liberadas ao desabilitar ou excluir a regra.
+- A histerese era esquecida quando o serviço reiniciava ou o SOC ficava indisponível,
+  podendo liberar recursos sozinha.
+- EP2: `--threads=3` casava com `--threads=30` por prefixo e a redução podia não aplicar.
+- **Coletores duplicados.** No Windows `SO_REUSEADDR` permite vários binds na mesma
+  porta, então três instâncias subiam juntas e disputavam o mesmo dongle, causando
+  timeouts intermitentes. A segunda instância agora falha ao abrir a porta e encerra.
+- Textos da UI com jargão interno, idioma misturado e uma frase incorreta ("nenhuma ação
+  é enviada"), além de elementos colados e grids espremidos no celular.
+
+### Alterado
+
+- A automação física deixou de ser bloqueada (`execution.enabled = false`) e passou a
+  executar as regras habilitadas.
+- README e `docs/PROTOCOL.md` atualizados; `examples/sample-output.json` regravado com
+  uma leitura real dos três inversores.
+
+### Notas
+
+- A corrente PV do mapa B (registradores 352/390) foi inferida por adjacência: à noite
+  ela vale zero. A potência solar deve ser conferida contra o display do inversor na
+  primeira leitura com geração.
+- Nenhuma alteração foi feita no código do Gate; a automação usa apenas
+  `POST /v1/admin/pausar` e `POST /v1/admin/retomar`.
+
 ## [1.0.0] — 2026-10-23
 
 ### Adicionado
@@ -25,11 +81,3 @@ e versionamento [SemVer](https://semver.org/lang/pt-BR/).
 
 - Sem dependências externas; apenas a biblioteca padrão do Python 3.10+.
 - Somente leitura: nenhum registrador de configuração é escrito.
-## [Não lançado]
-
-- Interface web Node.js na porta 3071.
-- Painel de SOC, potência, bateria, PV, carga e integrações.
-- Cadastro de nomes amigáveis por inversor.
-- Regras com faixa de SOC, histerese, intensidade desejada e associação do SOC.
-- Avaliação de intenções com automação física bloqueada por segurança.
-- Implantação opcional como tarefa agendada do Windows.

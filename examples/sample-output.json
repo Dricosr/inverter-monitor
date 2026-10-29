@@ -1,118 +1,127 @@
 {
- "timestamp": "2026-10-23T22:25:41-03:00",
- "devices": {
-  "anenji-6k2": {
-   "ip": "192.168.18.33",
-   "protocol": "modbus_a",
-   "online": true,
-   "mode": "Off-Grid",
-   "battery": {
-    "soc": 41,
-    "voltage": 53.0,
-    "current": 0.0,
-    "power": 0
-   },
-   "pv": {
-    "voltage": 28.8,
-    "current": 0.0,
-    "power": 0
-   },
-   "grid": {
-    "voltage": 222.9,
-    "frequency": 60.0,
-    "power": 0
-   },
-   "output": {
-    "voltage": 230.0,
-    "current": 0.3,
-    "frequency": 60.0,
-    "active_power": 2,
-    "apparent_power": 69
-   },
-   "load_percent": 1,
-   "temperature": {
-    "dcdc": 30,
-    "inverter": 30
-   },
-   "automation": {
-    "should_run": false,
-    "soc_on": 60,
-    "soc_off": 45,
-    "reason": "soc<=off"
-   }
-  },
-  "inversor-59": {
-   "ip": "192.168.18.59",
-   "protocol": "modbus_b",
-   "online": true,
-   "mode": null,
-   "battery": {
-    "soc": 53,
-    "voltage": 52.0,
-    "current": -4.9,
-    "power": -254,
-    "temperature": 33
-   },
-   "pv": {
-    "voltage": 32.5,
-    "voltage2": 31.8
-   },
-   "grid": {
-    "voltage": null,
-    "frequency": null
-   },
-   "output": {
-    "voltage": 240.0,
-    "current": 1.4,
-    "frequency": 60.01,
-    "active_power": 206,
-    "apparent_power": 336
-   },
-   "automation": {
-    "should_run": false,
-    "soc_on": 60,
-    "soc_off": 45,
-    "reason": "histerese"
-   }
-  },
-  "inversor-106": {
-   "ip": "192.168.18.106",
-   "protocol": "pi30",
-   "online": true,
-   "mode": "Battery",
-   "serial": "55355535553555",
-   "battery": {
-    "soc": 40,
-    "voltage": 52.2,
-    "current_charge": 0.0,
-    "current_discharge": 20.0,
-    "voltage_scc": 52.2
-   },
-   "pv": {
-    "voltage": 0.0,
-    "current": 0.0
-   },
-   "grid": {
-    "voltage": 0.0,
-    "frequency": 0.0
-   },
-   "output": {
-    "voltage": 231.1,
-    "frequency": 59.9,
-    "apparent_power": 1178,
-    "active_power": 897
-   },
-   "load_percent": 13,
-   "bus_voltage": 413,
-   "temperature": {
-    "inverter": 45
-   },
-   "automation": {
-    "should_run": false,
-    "soc_on": 60,
-    "soc_off": 45,
-    "reason": "soc<=off"
-   }
+  "timestamp": "2026-10-29T20:51:11-03:00",
+  "devices": {
+    "anenji-6k2": {
+      "ip": "192.168.18.33",
+      "protocol": "modbus_a",
+      "online": true,
+      "mode": "Off-Grid",
+      "battery": {
+        "soc": 43,
+        "voltage": 53.1,
+        "current": 0.0,
+        "power": 0
+      },
+      "pv": {
+        "voltage": 29.1,
+        "current": 0.0,
+        "power": 0
+      },
+      "grid": {
+        "voltage": 222.9,
+        "frequency": 60.0,
+        "power": 0
+      },
+      "output": {
+        "voltage": 229.8,
+        "current": 0.3,
+        "frequency": 59.99,
+        "active_power": 1,
+        "apparent_power": 68
+      },
+      "load_percent": 1,
+      "temperature": {
+        "dcdc": 34,
+        "inverter": 33
+      },
+      "automation": {
+        "should_run": false,
+        "soc_on": 60,
+        "soc_off": 45,
+        "reason": "soc<=off"
+      }
+    },
+    "inversor-59": {
+      "ip": "192.168.18.59",
+      "protocol": "modbus_b",
+      "online": true,
+      "mode": "Off-Grid",
+      "status_code": 3,
+      "battery": {
+        "soc": 54,
+        "voltage": 52.1,
+        "current": -4.9,
+        "power": -255,
+        "temperature": 35
+      },
+      "pv": {
+        "voltage": 26.6,
+        "voltage2": 25.6,
+        "current": 0.0,
+        "power": 0.0
+      },
+      "grid": {
+        "voltage": null,
+        "frequency": null
+      },
+      "output": {
+        "voltage": 240.0,
+        "current": 1.5,
+        "frequency": 60.01,
+        "active_power": 197,
+        "apparent_power": 360
+      },
+      "load_percent": 3,
+      "temperature": {
+        "inverter": 49
+      },
+      "automation": {
+        "should_run": false,
+        "soc_on": 60,
+        "soc_off": 45,
+        "reason": "histerese"
+      }
+    },
+    "inversor-106": {
+      "ip": "192.168.18.106",
+      "protocol": "pi30",
+      "online": true,
+      "mode": "Battery",
+      "serial": "55355535553555",
+      "battery": {
+        "soc": 40,
+        "voltage": 52.2,
+        "current_charge": 0.0,
+        "current_discharge": 18.0,
+        "power": -939.6,
+        "voltage_scc": 52.2
+      },
+      "pv": {
+        "voltage": 0.0,
+        "current": 0.0,
+        "power": 0.0
+      },
+      "grid": {
+        "voltage": 0.0,
+        "frequency": 0.0
+      },
+      "output": {
+        "voltage": 230.0,
+        "frequency": 60.0,
+        "apparent_power": 1083,
+        "active_power": 811
+      },
+      "load_percent": 12,
+      "bus_voltage": 414,
+      "temperature": {
+        "inverter": 43
+      },
+      "automation": {
+        "should_run": false,
+        "soc_on": 60,
+        "soc_off": 45,
+        "reason": "soc<=off"
+      }
+    }
   }
- }
 }

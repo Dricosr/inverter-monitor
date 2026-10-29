@@ -3,7 +3,7 @@
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Node.js](https://img.shields.io/badge/node.js-20%2B-5FA04E)
 ![Dependências](https://img.shields.io/badge/depend%C3%AAncias-nenhuma-brightgreen)
-![Testes](https://img.shields.io/badge/testes-18%20passando-brightgreen)
+![Testes](https://img.shields.io/badge/testes-41%20passando-brightgreen)
 ![Licença](https://img.shields.io/badge/licen%C3%A7a-MIT-green)
 ![Plataforma](https://img.shields.io/badge/plataforma-windows%20%7C%20linux%20%7C%20macos-lightgrey)
 
@@ -12,13 +12,13 @@ WiFi da família **Eybond / DessMonitor** — a mesma dos apps *SmartESS*, *DESS
 e *Wi-Fi Pro*.
 
 Entrega SOC da bateria, tensão, corrente, potência, PV, carga e temperatura em JSON,
-com API HTTP pronta para automação. **Sem dependências externas**: só a biblioteca
-padrão do Python 3.10+.
+com API HTTP pronta para automação. O coletor **não tem dependências externas**: usa
+apenas a biblioteca padrão do Python 3.10+ (o painel Node.js depende só de `express`).
 
 ```
-anenji-6k2     Off-Grid  SOC  48%   53.1V
-inversor-59              SOC  54%   52.1V   -4.2A / -218W
-inversor-106   Battery   SOC  41%   52.3V   905W / carga 12%
+anenji-6k2     Off-Grid  SOC  43%   53.1V
+inversor-59    Off-Grid  SOC  54%   52.1V   -4.9A / -255W
+inversor-106   Battery   SOC  40%   52.2V   811W / carga 12%
 ```
 
 ---
@@ -27,15 +27,17 @@ inversor-106   Battery   SOC  41%   52.3V   905W / carga 12%
 
 - [Por que existe](#por-que-existe)
 - [Como funciona](#como-funciona)
+- [Painel Node.js](#painel-nodejs)
+- [Leituras ao vivo](#leituras-ao-vivo)
 - [O que foi descoberto na rede](#o-que-foi-descoberto-na-rede)
 - [Instalação](#instalação)
 - [Uso pela linha de comando](#uso-pela-linha-de-comando)
-- [Painel Node.js](#painel-nodejs)
 - [API HTTP](#api-http)
 - [Formato do JSON](#formato-do-json)
-- [Automação com histerese de SOC](#automação-com-histerese-de-soc)
+- [Automação de cargas com histerese de SOC](#automação-de-cargas-com-histerese-de-soc)
 - [Integração com outros sistemas](#integração-com-outros-sistemas)
 - [Rodar como serviço](#rodar-como-serviço)
+- [Estrutura do repositório](#estrutura-do-repositório)
 - [Testes](#testes)
 - [Solução de problemas](#solução-de-problemas)
 - [Limitações e efeitos colaterais](#limitações-e-efeitos-colaterais)
@@ -136,7 +138,7 @@ dispositivos na rede; três deles são os dongles dos inversores:
 | Nome           | IP             | Chip      | Protocolo do inversor                          | Observação                        |
 | -------------- | -------------- | --------- | ---------------------------------------------- | --------------------------------- |
 | `anenji-6k2`   | 192.168.18.33  | Espressif | Modbus RTU — mapa **EG4 3000EHV** (200–344)    | reg. 643 = **6200 W** nominal     |
-| `inversor-59`  | 192.168.18.59  | Quectel   | Modbus RTU — mapa **Anenji** (bateria 277–281) | também expõe UI web na porta 80   |
+| `inversor-59`  | 192.168.18.59  | Quectel   | Modbus RTU — mapa **Anenji** (bateria 277–281) | reg. 691 = **11000 W** nominal; UI web na porta 80 |
 | `inversor-106` | 192.168.18.106 | Espressif | ASCII **PI30** (`QPIGS` / `QMOD`)              | serial `55355535553555`, FW `00152.02` |
 
 Outros equipamentos vistos, que **não** são inversores: `.1` roteador Huawei,
@@ -147,14 +149,15 @@ Outros equipamentos vistos, que **não** são inversores: `.1` roteador Huawei,
 
 ## Instalação
 
-Requisitos: **Python 3.10+** e estar na mesma rede dos dongles.
+Requisitos: **Python 3.10+** e estar na mesma rede dos dongles. Para o painel, também
+**Node.js 20+** (`npm install` na raiz do projeto — a única dependência é `express`).
 
 ```bash
 git clone https://github.com/Dricosr/inverter-monitor.git
 cd inverter-monitor
 ```
 
-Não há `pip install` — não há dependências.
+O coletor não precisa de `pip install`: não há dependências.
 
 Se os IPs forem outros, ajuste [`devices.json`](devices.json):
 
@@ -216,13 +219,23 @@ Servida quando `--http` é diferente de `0` (padrão `8080`).
 
 ```powershell
 $s = Invoke-RestMethod http://localhost:8080/status
-$s.devices.'inversor-106'.battery.soc      # 41
-$s.devices.'inversor-106'.battery.voltage  # 52.3
+$s.devices.'inversor-106'.battery.soc      # 40
+$s.devices.'inversor-106'.battery.voltage  # 52.2
 ```
 
 ```bash
 curl -s http://localhost:8080/status/inversor-106 | jq .battery
 ```
+
+### API do painel (porta 3071)
+
+| Rota | Método | Retorno |
+| --- | --- | --- |
+| `/api/dashboard` | GET | Inversores normalizados, integrações, regras e estado de execução |
+| `/api/devices/<id>` | PUT | Salva o nome exibido (`{ "displayName": "..." }`) |
+| `/api/rules` | POST | Cria regra (`id`, `name`, `action`, `sourceDeviceId`, `activateBelow`, `resumeAbove`, `desiredIntensity`, `enabled`) |
+| `/api/rules/<id>` | PUT / DELETE | Atualiza ou exclui uma regra |
+| `/health` | GET | `{"ok": true, "port": 3071, "automationEnabled": true}` |
 
 ## Formato do JSON
 
@@ -234,19 +247,20 @@ Cada dispositivo é um objeto. Campos com `*` dependem do protocolo.
 | `protocol` | `modbus_a` \| `modbus_b` \| `pi30` | Protocolo detectado/configurado |
 | `online` | bool | `true` se o ciclo conseguiu ler |
 | `error` | string | Presente apenas quando `online = false` |
-| `mode` | string \| null | Modo de operação (ex.: `Off-Grid`, `Battery`, `Line`) |
+| `mode` | string \| null | Modo de operação (`Off-Grid`, `Battery`, `Line`, `Standby`…) |
+| `status_code`* | int | Código bruto do modo (`modbus_b`), útil para diagnóstico |
 | `serial`* | string | Serial do inversor (só `pi30`) |
 | `battery.soc` | int | **SOC em %** |
 | `battery.voltage` | float | Tensão da bateria (V) |
 | `battery.current`* | float | Corrente (A); negativo = descarregando (`modbus_a`/`modbus_b`) |
-| `battery.power`* | int | Potência (W); negativo = descarregando |
+| `battery.power`* | float | Potência (W); negativo = descarregando |
 | `battery.temperature`* | int | Temperatura do módulo DC (°C) |
 | `battery.current_charge`* | float | Corrente de carga (A) — só `pi30` |
 | `battery.current_discharge`* | float | Corrente de descarga (A) — só `pi30` |
 | `battery.voltage_scc`* | float | Tensão vista pelo SCC (V) — só `pi30` |
 | `pv.voltage` | float \| null | Tensão PV (V) |
-| `pv.current`* | float | Corrente PV (A) |
-| `pv.power`* | int | Potência PV (W) |
+| `pv.current`* | float | Corrente PV (A) — `modbus_a`, `modbus_b` e `pi30` |
+| `pv.power`* | float | Potência PV (W) — informada ou calculada por `V × I` |
 | `pv.voltage2`* | float | Tensão do 2º MPPT (`modbus_b`) |
 | `grid.voltage` | float \| null | Tensão da rede (V); `null` se não exposta |
 | `grid.frequency` | float \| null | Frequência da rede (Hz) |
@@ -255,10 +269,10 @@ Cada dispositivo é um objeto. Campos com `*` dependem do protocolo.
 | `output.current` | float | Corrente de saída (A) |
 | `output.active_power` | int | Potência ativa (W) |
 | `output.apparent_power` | int | Potência aparente (VA) |
-| `load_percent`* | int | Carga em % |
+| `load_percent`* | int | Carga em % (`modbus_a`, `modbus_b` e `pi30`) |
 | `bus_voltage`* | int | Tensão do barramento DC (só `pi30`) |
-| `temperature.dcdc` | int | Temperatura do DCDC (°C) |
-| `temperature.inverter` | int | Temperatura do inversor (°C) |
+| `temperature.dcdc`* | int | Temperatura do DCDC (°C) — só `modbus_a` |
+| `temperature.inverter`* | int | Temperatura do inversor (°C) — os três protocolos |
 | `automation` | objeto | Presente quando há `soc_on`/`soc_off` — ver abaixo |
 
 Um exemplo real e completo está em [`examples/sample-output.json`](examples/sample-output.json).
@@ -387,7 +401,19 @@ sensor:
 
 ## Rodar como serviço
 
-**Windows** — tarefa agendada que sobe no boot, sem sessão aberta:
+**Windows (recomendado)** — os scripts de [`deploy/`](deploy) registram as tarefas
+ocultas, com gatilho de boot **e** de logon, reinício automático e sem limite de tempo:
+
+```powershell
+pwsh -File deploy\install-collector.ps1   # coletor Python  -> tarefa InverterMonitorCollector
+pwsh -File deploy\install-ui.ps1          # painel Node.js  -> tarefa InverterMonitorUI
+```
+
+As tarefas aparecem como `InverterMonitorCollector` e `InverterMonitorUI`; os scripts
+liberam as portas 8080 e 3071 no firewall e encerram a instância anterior antes de
+subir a nova, para não deixar processo órfão segurando a porta.
+
+Alternativa manual:
 
 ```powershell
 $py = (Get-Command python).Source
@@ -420,24 +446,50 @@ WantedBy=multi-user.target
 sudo systemctl enable --now inverter-monitor
 ```
 
+## Estrutura do repositório
+
+```
+inverter-monitor/
+├─ inverter_monitor.py   coletor, parsers e API HTTP (somente stdlib)
+├─ devices.json          nome, IP e protocolo de cada inversor
+├─ docs/PROTOCOL.md      engenharia reversa: framing, campos fc e mapas de registradores
+├─ src/                  painel Node.js
+│  ├─ server.mjs         Express, /health e inicialização da automação
+│  ├─ config.mjs         configuração por variáveis de ambiente
+│  ├─ domain/            normalização do status e avaliação das regras
+│  ├─ services/          integrações e executores de ação (services/automation/)
+│  └─ routes/            API do painel
+├─ public/               HTML, CSS, JS e ícone do painel
+├─ deploy/               tarefas agendadas e script de threads do XMRig
+├─ examples/             saída real, uso como biblioteca e PowerShell
+├─ tests/                parsers (Python) e automação (Node)
+└─ data/                 estado em tempo de execução (ignorado pelo Git)
+```
+
 ## Testes
 
 ```bash
+# parsers, CRC e framing (25 testes, nenhum toca a rede)
 python -m unittest discover -s tests -v
+
+# automação e normalização do painel (16 testes)
+npm test
 ```
 
-18 testes cobrindo CRC (Modbus e PI30), framing Eybond, `rtu_read` e os três parsers,
-usando bytes capturados de equipamentos reais. Nenhum teste toca a rede.
+Os testes em Python usam bytes capturados de equipamentos reais; os do painel usam
+executores falsos, sem tocar no Gate, no SSH ou no XMRig.
 
 ## Solução de problemas
 
 | Sintoma | Causa provável | O que fazer |
 | --- | --- | --- |
 | `porta 8899 ocupada` | Outra instância rodando | Feche a outra instância — a porta é fixa no firmware |
+| `porta 8080 ja esta em uso` | Segundo coletor iniciado por engano | O processo novo encerra sozinho; mantenha apenas um (`Get-NetTCPConnection -LocalPort 8080`) |
 | `nao conectou de volta em 25s` | Dongle offline, IP mudou ou já conectado a outro servidor | `ping` no IP; confira `devices.json`; rode com `-v` |
 | `nenhum protocolo conhecido respondeu` | Mapa diferente do esperado | `--probe` com `-v` e ajuste o `"protocol"` |
-| `resposta Modbus invalida` | Endereço de registrador fora da faixa | Só leitura; não há escritas no código |
+| `resposta Modbus invalida` | Endereço de registrador fora da faixa ou dongle atropelado | Só leitura; o coletor já repete uma vez com 150 ms de respiro |
 | SOC `0` com todos os campos zerados | Mapa errado respondendo com zeros | A validação de plausibilidade já rejeita isso na detecção |
+| `Geração solar` em `0 W` mesmo de dia | PV desconectado, sem sol ou corrente PV não publicada | Confira a tensão PV no JSON; ver a ressalva em [docs/PROTOCOL.md](docs/PROTOCOL.md#6-modbus-rtu--mapa-b-anenji) |
 | Firewall do Windows pedindo liberação | Conexão de **entrada** na 8899 | Permita para rede privada |
 | `NAK` / valores de `QPIGS` deslocados | CRC errado | Use `pi30()` do módulo — o init do CRC é `0x0000` |
 
@@ -449,9 +501,15 @@ usando bytes capturados de equipamentos reais. Nenhum teste toca a rede.
   O app oficial pode mostrar atraso de alguns minutos e volta ao normal depois que o
   dongle reconecta ao servidor da nuvem. Não há proxy permanente nem interceptacao DNS
   neste modo, e o software só usa o redirecionamento temporario exigido pela leitura local.
-- **A porta 8899 é exclusiva.** Só um processo pode usá-la.
-- `inversor-59` não expõe modo de operação nem tensão de rede — o dongle dele não
-  publica esses registradores.
+- **A porta 8899 é exclusiva.** Só um processo pode usá-la. O coletor também exige a
+  porta HTTP livre: se outro processo já estiver na 8080, a instância nova encerra em
+  vez de rodar em paralelo.
+- `inversor-59` publica modo, carga, temperatura e PV, mas **não** a tensão de rede —
+  esses registradores (202/203) respondem zero nesse modelo e são omitidos.
+- **Corrente PV do mapa B ainda em validação.** À noite os registradores 352/390 valem
+  zero, então a posição foi inferida por adjacência aos pares de tensão. A primeira
+  leitura com geração deve ser conferida contra o display do inversor; o ajuste, se
+  necessário, é uma linha em `read_modbus_b`.
 - Em `pi30`, `battery.current_discharge` vem do campo `PPPPP` do `QPIGS` e é reportado
   em ampères inteiros; `current_charge` tem 1 decimal.
 - Se o dongle trocar de IP (DHCP), ajuste `devices.json`. Recomendado: reserva de IP
@@ -460,6 +518,10 @@ usando bytes capturados de equipamentos reais. Nenhum teste toca a rede.
 
 ## Roadmap
 
+- [ ] Validar a corrente PV do mapa B à luz do dia (registradores 352/390) e confirmar
+      a escala da potência solar do `.59`.
+- [ ] Expor tensão/frequência de rede no `.59` caso o firmware passe a responder os
+      registradores 202/203.
 - [ ] Modo *proxy*: manter nuvem **e** local simultâneos, redirecionando
       `ess.eybond.com` no DNS do roteador e repassando para o servidor real
       (ideia de [`powmr-eybond-proxy`]).
