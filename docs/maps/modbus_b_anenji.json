@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "map_key": "modbus_b_anenji",
+  "title": "Modbus RTU — mapa B (Anenji / Megarevo)",
+  "description": "Mapa do inversor Anenji 11 kW (dongle Eybond). Bateria, PV e temperaturas ficam em blocos separados de enderecos baixos.",
+  "transport": {
+    "kind": "modbus_rtu",
+    "slave": 1,
+    "function_code": 3,
+    "endianness": "big",
+    "word_swap": false,
+    "gap_between_reads_ms": 50,
+    "reads": [
+      { "key": "serial", "start": 180, "count": 20 },
+      { "key": "header", "start": 200, "count": 37 },
+      { "key": "output", "start": 252, "count": 4 },
+      { "key": "battery", "start": 277, "count": 29 },
+      { "key": "output_pv1", "start": 342, "count": 12 },
+      { "key": "pv2", "start": 389, "count": 3 }
+    ],
+    "notes": [
+      "Envie os frames pela funcao fc=4 do frame Eybond (canal transparente).",
+      "Leituras curtas voltam ZERADAS neste dongle: 186+7 e 180+13 dao tudo zero; so 180+20 devolve o serial. Prefira blocos grandes e alinhados.",
+      "O dongle aceita uma conexao por vez; feche e aguarde ~1,5 s antes de devolver ao servidor da nuvem."
+    ]
+  },
+  "registers": [
+    { "address": 186, "count": 7, "key": "serial", "name": "SN em ASCII", "type": "ascii", "chars": 14, "unit": null, "scale": 1, "signed": false, "evidence": "measured", "note": "2 caracteres por registrador. Devolve 92B32504103913, identico ao SN da nuvem." },
+
+    { "address": 200, "key": "map_id", "name": "Identificador do mapa", "type": "int", "unit": null, "scale": 1, "signed": false, "evidence": "measured", "note": "0xB000 neste modelo; tambem presente no mapa A." },
+    { "address": 201, "key": "mode", "name": "Modo de trabalho", "type": "enum", "unit": null, "scale": 1, "signed": false, "evidence": "measured",
+      "enum": { "0": "Power On", "1": "Standby", "2": "Mains", "3": "Off-Grid", "4": "Bypass", "5": "Charging", "6": "Fault" } },
+    { "address": 202, "key": "grid_voltage", "name": "Tensao da rede", "type": "float", "unit": "V", "scale": 0.1, "signed": false, "evidence": "documented", "note": "0 = sem rede (off-grid)." },
+    { "address": 203, "key": "grid_frequency", "name": "Frequencia da rede", "type": "float", "unit": "Hz", "scale": 0.01, "signed": false, "evidence": "documented" },
+
+    { "address": 231, "key": "temperature_inverter", "name": "Temperatura do modulo INV", "type": "int", "unit": "C", "scale": 1, "signed": true, "evidence": "measured", "note": "Nuvem 43 C <-> local 44 C. O registrador 343 NAO e esta grandeza." },
+
+    { "address": 252, "key": "output_current", "name": "Corrente de saida", "type": "float", "unit": "A", "scale": 0.1, "signed": true, "evidence": "measured" },
+    { "address": 253, "key": "output_frequency", "name": "Frequencia de saida", "type": "float", "unit": "Hz", "scale": 0.01, "signed": false, "evidence": "measured" },
+    { "address": 254, "key": "output_active_power", "name": "Potencia ativa de saida", "type": "int", "unit": "W", "scale": 1, "signed": true, "evidence": "measured" },
+    { "address": 255, "key": "output_apparent_power", "name": "Potencia aparente de saida", "type": "int", "unit": "VA", "scale": 1, "signed": true, "evidence": "measured" },
+
+    { "address": 277, "key": "battery_voltage", "name": "Tensao da bateria", "type": "float", "unit": "V", "scale": 0.1, "signed": false, "evidence": "measured" },
+    { "address": 278, "key": "battery_current", "name": "Corrente da bateria", "type": "float", "unit": "A", "scale": 0.1, "signed": true, "evidence": "measured", "note": "Negativo = descarregando." },
+    { "address": 279, "key": "battery_power", "name": "Potencia da bateria", "type": "int", "unit": "W", "scale": 1, "signed": true, "evidence": "measured" },
+    { "address": 280, "key": "soc", "name": "SOC", "type": "int", "unit": "%", "scale": 1, "signed": false, "evidence": "measured" },
+    { "address": 281, "key": "temperature_dcdc", "name": "Temperatura do modulo DC", "type": "int", "unit": "C", "scale": 1, "signed": true, "evidence": "measured", "note": "Nuvem 34 C <-> local 34 C." },
+    { "address": 302, "key": "pv_total_power", "name": "Potencia PV total (medida)", "type": "int", "unit": "W", "scale": 1, "signed": false, "evidence": "measured", "note": "Confere com 353+391 em todas as amostras." },
+    { "address": 303, "key": "pv_charging_power", "name": "Potencia de carga vinda do PV", "type": "int", "unit": "W", "scale": 1, "signed": false, "evidence": "measured", "note": "Repete a potencia da bateria (279)." },
+    { "address": 304, "key": "pv_charging_current", "name": "Corrente de carga vinda do PV", "type": "float", "unit": "A", "scale": 0.1, "signed": false, "evidence": "measured" },
+    { "address": 305, "key": "temperature_pv", "name": "Temperatura do modulo PV", "type": "int", "unit": "C", "scale": 1, "signed": true, "evidence": "measured", "note": "Nuvem 39-40 C <-> local 39-41 C." },
+
+    { "address": 342, "key": "output_voltage", "name": "Tensao de saida", "type": "float", "unit": "V", "scale": 0.1, "signed": false, "evidence": "measured", "note": "O registrador 346 repete o valor." },
+    { "address": 343, "key": "temperature_unknown", "name": "Temperatura (nao publicada)", "type": "int", "unit": "C", "scale": 1, "signed": true, "evidence": "inferred", "note": "Sobe com a carga (47-49 C), mas NAO e a temperatura que o fabricante publica. Lido e descartado." },
+    { "address": 350, "key": "load_percent", "name": "Carga do inversor", "type": "int", "unit": "%", "scale": 1, "signed": false, "evidence": "measured" },
+    { "address": 351, "key": "pv1_voltage", "name": "Tensao PV1", "type": "float", "unit": "V", "scale": 0.1, "signed": false, "evidence": "measured" },
+    { "address": 352, "key": "pv1_current", "name": "Corrente PV1", "type": "float", "unit": "A", "scale": 0.1, "signed": false, "evidence": "measured", "note": "Confirmado por 353 ~= 351 x 352." },
+    { "address": 353, "key": "pv1_power", "name": "Potencia PV1", "type": "int", "unit": "W", "scale": 1, "signed": false, "evidence": "measured" },
+    { "address": 389, "key": "pv2_voltage", "name": "Tensao PV2", "type": "float", "unit": "V", "scale": 0.1, "signed": false, "evidence": "measured" },
+    { "address": 390, "key": "pv2_current", "name": "Corrente PV2", "type": "float", "unit": "A", "scale": 0.1, "signed": false, "evidence": "measured", "note": "Confirmado por 391 ~= 389 x 390." },
+    { "address": 391, "key": "pv2_power", "name": "Potencia PV2", "type": "int", "unit": "W", "scale": 1, "signed": false, "evidence": "measured" },
+
+    { "address": 691, "key": "nominal_power", "name": "Potencia nominal", "type": "int", "unit": "W", "scale": 1, "signed": false, "evidence": "measured", "note": "11000 nesta unidade." },
+    { "address": 750, "key": "unknown_750", "name": "Desconhecido (~3810)", "type": "int", "unit": null, "scale": 1, "signed": false, "evidence": "rejected", "note": "Parecia energia diaria, mas oscila para cima e para baixo (3814 -> 3806 -> 3813). NAO e contador." }
+  ]
+}

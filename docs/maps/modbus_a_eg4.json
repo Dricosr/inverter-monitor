@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "map_key": "modbus_a_eg4",
+  "title": "Modbus RTU — mapa A (EG4 3000EHV / Axpert)",
+  "description": "Mapa do inversor Anenji 6.2 kW (dongle Eybond). Bateria, PV e saida cabem num bloco unico de 45 registradores a partir de 200.",
+  "transport": {
+    "kind": "modbus_rtu",
+    "slave": 1,
+    "function_code": 3,
+    "endianness": "big",
+    "word_swap": false,
+    "gap_between_reads_ms": 50,
+    "reads": [
+      { "key": "serial", "start": 180, "count": 20 },
+      { "key": "live", "start": 200, "count": 45 }
+    ],
+    "notes": [
+      "Este mapa responde tambem no dongle do .59, mas com tudo zerado: valide a plausibilidade (SOC 0-100 e bateria 8-80 V) antes de aceitar.",
+      "O SN sai do mesmo bloco alinhado 180+20 do mapa B (regs 186-192 em ASCII)."
+    ]
+  },
+  "registers": [
+    { "address": 186, "count": 7, "key": "serial", "name": "SN em ASCII", "type": "ascii", "chars": 14, "unit": null, "scale": 1, "signed": false, "evidence": "measured", "note": "Devolve 9253123456789B, identico ao SN da nuvem." },
+
+    { "address": 200, "key": "map_id", "name": "Identificador do mapa", "type": "int", "unit": null, "scale": 1, "signed": false, "evidence": "measured", "note": "0xB000." },
+    { "address": 201, "key": "mode", "name": "Modo de trabalho", "type": "enum", "unit": null, "scale": 1, "signed": false, "evidence": "measured",
+      "enum": { "0": "Power On", "1": "Standby", "2": "Mains", "3": "Off-Grid", "4": "Bypass", "5": "Charging", "6": "Fault" } },
+    { "address": 202, "key": "grid_voltage", "name": "Tensao da rede", "type": "float", "unit": "V", "scale": 0.1, "signed": false, "evidence": "documented", "note": "Zero nesta instalacao (off-grid), igual a nuvem." },
+    { "address": 203, "key": "grid_frequency", "name": "Frequencia da rede", "type": "float", "unit": "Hz", "scale": 0.01, "signed": false, "evidence": "documented" },
+    { "address": 204, "key": "grid_power", "name": "Potencia da rede", "type": "int", "unit": "W", "scale": 1, "signed": true, "evidence": "documented" },
+
+    { "address": 210, "key": "output_voltage", "name": "Tensao de saida", "type": "float", "unit": "V", "scale": 0.1, "signed": false, "evidence": "measured", "note": "Nuvem 229.9 V <-> local 230.0 V." },
+    { "address": 211, "key": "output_current", "name": "Corrente de saida", "type": "float", "unit": "A", "scale": 0.1, "signed": true, "evidence": "measured" },
+    { "address": 212, "key": "output_frequency", "name": "Frequencia de saida", "type": "float", "unit": "Hz", "scale": 0.01, "signed": false, "evidence": "measured" },
+    { "address": 213, "key": "output_active_power", "name": "Potencia ativa de saida", "type": "int", "unit": "W", "scale": 1, "signed": true, "evidence": "measured", "note": "Oscila entre -1 e 1 com carga quase nula; a nuvem mostra 0 W." },
+    { "address": 214, "key": "output_apparent_power", "name": "Potencia aparente de saida", "type": "int", "unit": "VA", "scale": 1, "signed": true, "evidence": "measured" },
+
+    { "address": 215, "key": "battery_voltage", "name": "Tensao da bateria", "type": "float", "unit": "V", "scale": 0.1, "signed": true, "evidence": "measured" },
+    { "address": 216, "key": "battery_current_alt", "name": "Corrente da bateria (alternativa)", "type": "float", "unit": "A", "scale": 0.1, "signed": true, "evidence": "documented", "note": "Zero nesta unidade; use 232." },
+    { "address": 217, "key": "battery_power", "name": "Potencia da bateria", "type": "int", "unit": "W", "scale": 1, "signed": true, "evidence": "documented" },
+    { "address": 219, "key": "pv_voltage", "name": "Tensao PV", "type": "float", "unit": "V", "scale": 0.1, "signed": true, "evidence": "measured", "note": "Nuvem 28.4 V <-> local 29.3 V." },
+    { "address": 220, "key": "pv_current", "name": "Corrente PV", "type": "float", "unit": "A", "scale": 0.1, "signed": true, "evidence": "documented", "note": "Zero com o arranjo sem producao." },
+    { "address": 223, "key": "pv_power", "name": "Potencia PV", "type": "int", "unit": "W", "scale": 1, "signed": true, "evidence": "documented" },
+    { "address": 225, "key": "load_percent", "name": "Carga do inversor", "type": "int", "unit": "%", "scale": 1, "signed": true, "evidence": "measured" },
+    { "address": 226, "key": "temperature_dcdc", "name": "Temperatura do modulo DC", "type": "int", "unit": "C", "scale": 1, "signed": true, "evidence": "measured" },
+    { "address": 227, "key": "temperature_inverter", "name": "Temperatura do inversor", "type": "int", "unit": "C", "scale": 1, "signed": true, "evidence": "measured" },
+    { "address": 229, "key": "soc", "name": "SOC", "type": "int", "unit": "%", "scale": 1, "signed": false, "evidence": "measured" },
+    { "address": 232, "key": "battery_current", "name": "Corrente da bateria", "type": "float", "unit": "A", "scale": 0.1, "signed": true, "evidence": "measured", "note": "Positivo = carregando. Este e o valor usado pelo coletor." },
+
+    { "address": 643, "key": "nominal_power", "name": "Potencia nominal", "type": "int", "unit": "W", "scale": 1, "signed": false, "evidence": "measured", "note": "6200 nesta unidade." },
+    { "address": 218, "key": "unknown_218", "name": "Desconhecido (3776)", "type": "int", "unit": null, "scale": 1, "signed": false, "evidence": "rejected", "note": "377.6 com escala 0.1, mas a nuvem nao tem coluna correspondente e o valor nao acompanha o PV. Provavel ajuste." }
+  ]
+}

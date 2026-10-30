@@ -3,6 +3,11 @@
 Documento de apoio ao [`inverter_monitor.py`](../inverter_monitor.py). Registra o que
 foi testado, o que funcionou e o que não funcionou, com valores reais capturados.
 
+> Para **usar** os mapas em outro projeto, prefira
+> [`REGISTER-MAPS.md`](REGISTER-MAPS.md): lá os mapas estão completos, com o nível de
+> evidência de cada campo, e em JSON legível por máquina em [`maps/`](maps). Este
+> documento é o diário de como se chegou até eles.
+
 Todos os testes foram feitos na própria rede local, nos três dongles da instalação.
 
 ---

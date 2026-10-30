@@ -105,6 +105,17 @@ escritório — sem depender de latência de nuvem nem de cota de API.
 Detalhamento completo — armadilhas do CRC, significado dos `fc`, mapas de registradores e
 a conferência contra a nuvem do fabricante — em **[docs/PROTOCOL.md](docs/PROTOCOL.md)**.
 
+Para **reimplementar a leitura em outra linguagem**, use
+**[docs/REGISTER-MAPS.md](docs/REGISTER-MAPS.md)**: os mapas completos ficam em
+[`docs/maps/`](docs/maps) como JSON legível por máquina, com o nível de evidência de cada
+campo (medido, documentado, inferido ou descartado) e o passo a passo de como descobrir um
+mapa novo. Para conferir tudo contra o seu próprio equipamento:
+
+```bash
+python examples/dump_map.py --ip 192.168.18.59  --map docs/maps/modbus_b_anenji.json
+python examples/dump_map.py --ip 192.168.18.106 --map docs/maps/modbus_0925_smg.json
+```
+
 ## Os três inversores
 
 | Nome | IP | Dongle | Protocolo | Identificação |
@@ -535,6 +546,8 @@ inverter-monitor/
 ├─ inverter_monitor.py   coletor, parsers e API HTTP (somente stdlib)
 ├─ devices.json          nome, IP, protocolo e histerese de SOC de cada inversor
 ├─ docs/PROTOCOL.md      engenharia reversa: framing, campos fc e mapas de registradores
+├─ docs/REGISTER-MAPS.md referência dos mapas para reuso em outras linguagens
+├─ docs/maps/            os mapas em JSON legível por máquina (fonte da verdade)
 ├─ src/                  painel Node.js
 │  ├─ server.mjs         Express, /health e inicialização da automação
 │  ├─ config.mjs         configuração por variáveis de ambiente
@@ -543,7 +556,7 @@ inverter-monitor/
 │  └─ routes/            API do painel
 ├─ public/               HTML, CSS, JS e ícone do painel
 ├─ deploy/               tarefas agendadas e script de threads do XMRig
-├─ examples/             saída real, uso como biblioteca e PowerShell
+├─ examples/             saída real, uso como biblioteca, PowerShell e dump de mapas
 ├─ tests/                parsers e poll (Python) e automação (Node)
 └─ data/                 estado em tempo de execução (ignorado pelo Git)
 ```

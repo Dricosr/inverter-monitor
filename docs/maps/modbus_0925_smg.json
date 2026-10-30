@@ -1,0 +1,476 @@
+{
+  "schema_version": 1,
+  "map_key": "modbus_0925_smg",
+  "title": "Modbus RTU — mapa 0925 (SMG / Megarevo) — o MPPT2 do MPS 10.2",
+  "description": "Mapa que o dongle usa para alimentar a nuvem no inversor MPS 10.2 kW (QMN VMII-NXPW5KW). Fica em enderecos altos, slave 5, com os bytes de cada registrador trocados.",
+  "transport": {
+    "kind": "modbus_rtu",
+    "slave": 5,
+    "function_code": 3,
+    "endianness": "little",
+    "word_swap": true,
+    "gap_between_reads_ms": 50,
+    "reads": [
+      {
+        "key": "live",
+        "start": 4501,
+        "count": 64
+      }
+    ],
+    "notes": [
+      "ARMADILHA 1: o slave e 5, nao 1. Slaves 0-4 e 6-32 respondem timeout.",
+      "ARMADILHA 2: os enderecos sao altos (4501+). Ler 200-700 devolve timeout, o que faz parecer que o inversor nao fala Modbus.",
+      "ARMADILHA 3: os bytes de cada registrador chegam trocados. 4504 = 453 chega no fio como C5 01; ler big-endian devolve 50433 e o mapa inteiro parece lixo.",
+      "O bloco termina em 4564: pedir 4565+ devolve o mesmo bloco truncado. Leituras de 80 registradores sao truncadas em 64, e 45 em 10.",
+      "O mesmo inversor responde PI30 em ASCII (QPIGS). Este mapa complementa o PI30: e dele que sai o MPPT2 e a corrente real da bateria."
+    ]
+  },
+  "registers": [
+    {
+      "address": 4501,
+      "key": "working_state",
+      "name": "Estado de trabalho",
+      "type": "enum",
+      "unit": null,
+      "scale": 1,
+      "signed": false,
+      "evidence": "documented",
+      "enum": {
+        "3": "Invert Mode / Off-Grid"
+      }
+    },
+    {
+      "address": 4502,
+      "key": "grid_voltage",
+      "name": "Tensao da rede",
+      "type": "float",
+      "unit": "V",
+      "scale": 0.1,
+      "signed": false,
+      "evidence": "documented",
+      "note": "Zero sem rede."
+    },
+    {
+      "address": 4503,
+      "key": "grid_frequency",
+      "name": "Frequencia da rede",
+      "type": "float",
+      "unit": "Hz",
+      "scale": 0.1,
+      "signed": false,
+      "evidence": "documented",
+      "note": "Frequencia da rede (nao a de saida). Zero sem rede."
+    },
+    {
+      "address": 4504,
+      "key": "pv1_voltage",
+      "name": "Tensao PV1 (MPPT1)",
+      "type": "float",
+      "unit": "V",
+      "scale": 0.1,
+      "signed": false,
+      "evidence": "measured",
+      "note": "Nuvem PV1 43.9 V <-> local 45.3 V. Coincide com o campo 13 do QPIGS."
+    },
+    {
+      "address": 4505,
+      "key": "pv1_power",
+      "name": "Potencia PV1 (MPPT1)",
+      "type": "int",
+      "unit": "W",
+      "scale": 1,
+      "signed": false,
+      "evidence": "measured"
+    },
+    {
+      "address": 4506,
+      "key": "battery_voltage",
+      "name": "Tensao da bateria",
+      "type": "float",
+      "unit": "V",
+      "scale": 0.1,
+      "signed": false,
+      "evidence": "measured"
+    },
+    {
+      "address": 4507,
+      "key": "soc",
+      "name": "SOC",
+      "type": "int",
+      "unit": "%",
+      "scale": 1,
+      "signed": false,
+      "evidence": "measured"
+    },
+    {
+      "address": 4508,
+      "key": "charge_current",
+      "name": "Corrente de carga",
+      "type": "int",
+      "unit": "A",
+      "scale": 1,
+      "signed": false,
+      "evidence": "measured",
+      "note": "CORRETA: o campo 9 do QPIGS subnotifica (2 A contra 7 A medidos)."
+    },
+    {
+      "address": 4509,
+      "key": "discharge_current",
+      "name": "Corrente de descarga",
+      "type": "int",
+      "unit": "A",
+      "scale": 1,
+      "signed": false,
+      "evidence": "measured"
+    },
+    {
+      "address": 4510,
+      "key": "output_voltage",
+      "name": "Tensao de saida",
+      "type": "float",
+      "unit": "V",
+      "scale": 0.1,
+      "signed": false,
+      "evidence": "measured"
+    },
+    {
+      "address": 4511,
+      "key": "output_frequency",
+      "name": "Frequencia de saida",
+      "type": "float",
+      "unit": "Hz",
+      "scale": 0.1,
+      "signed": false,
+      "evidence": "measured"
+    },
+    {
+      "address": 4512,
+      "key": "output_apparent_power",
+      "name": "Potencia aparente de saida",
+      "type": "int",
+      "unit": "VA",
+      "scale": 1,
+      "signed": false,
+      "evidence": "measured"
+    },
+    {
+      "address": 4513,
+      "key": "output_active_power",
+      "name": "Potencia ativa de saida",
+      "type": "int",
+      "unit": "W",
+      "scale": 1,
+      "signed": false,
+      "evidence": "measured"
+    },
+    {
+      "address": 4514,
+      "key": "load_percent",
+      "name": "Carga do inversor",
+      "type": "int",
+      "unit": "%",
+      "scale": 1,
+      "signed": false,
+      "evidence": "measured"
+    },
+    {
+      "address": 4517,
+      "key": "machine_type",
+      "name": "Machine type",
+      "type": "int",
+      "unit": null,
+      "scale": 1,
+      "signed": false,
+      "evidence": "measured",
+      "note": "520 neste modelo; a nuvem mostra o mesmo."
+    },
+    {
+      "address": 4518,
+      "key": "cpu_version",
+      "name": "CPU principal",
+      "type": "int",
+      "unit": null,
+      "scale": 1,
+      "signed": false,
+      "evidence": "measured",
+      "note": "15202 = 00152.02, igual ao QVFW e a nuvem."
+    },
+    {
+      "address": 4521,
+      "key": "nominal_output_apparent_power",
+      "name": "Nominal aparente",
+      "type": "int",
+      "unit": "VA",
+      "scale": 1,
+      "signed": false,
+      "evidence": "measured",
+      "note": "10200."
+    },
+    {
+      "address": 4522,
+      "key": "nominal_output_active_power",
+      "name": "Nominal ativo",
+      "type": "int",
+      "unit": "W",
+      "scale": 1,
+      "signed": false,
+      "evidence": "measured",
+      "note": "10200."
+    },
+    {
+      "address": 4523,
+      "key": "nominal_ac_voltage",
+      "name": "Nominal AC tensao",
+      "type": "int",
+      "unit": "V",
+      "scale": 1,
+      "signed": false,
+      "evidence": "measured",
+      "note": "Valor 230 - ajuste nominal, nao medicao."
+    },
+    {
+      "address": 4524,
+      "key": "nominal_ac_current",
+      "name": "Nominal AC corrente",
+      "type": "int",
+      "unit": "A",
+      "scale": 1,
+      "signed": false,
+      "evidence": "measured",
+      "note": "Valor 44 - ajuste nominal, nao medicao."
+    },
+    {
+      "address": 4525,
+      "key": "rated_battery_voltage",
+      "name": "Tensao nominal da bateria",
+      "type": "int",
+      "unit": "V",
+      "scale": 0.1,
+      "signed": false,
+      "evidence": "documented",
+      "note": "480 = 48,0 V."
+    },
+    {
+      "address": 4526,
+      "key": "nominal_output_voltage",
+      "name": "Nominal de saida (V)",
+      "type": "int",
+      "unit": "V",
+      "scale": 1,
+      "signed": false,
+      "evidence": "measured",
+      "note": "Valor 230 - ajuste nominal, nao medicao."
+    },
+    {
+      "address": 4527,
+      "key": "nominal_output_frequency",
+      "name": "Nominal de saida (Hz)",
+      "type": "int",
+      "unit": "Hz",
+      "scale": 0.1,
+      "signed": false,
+      "evidence": "documented",
+      "note": "Valor 500 = 50,0 Hz MESMO com a saida em 60 Hz: e ajuste nominal, nao a frequencia real (use 4511)."
+    },
+    {
+      "address": 4528,
+      "key": "nominal_output_current",
+      "name": "Nominal de saida (A)",
+      "type": "int",
+      "unit": "A",
+      "scale": 1,
+      "signed": false,
+      "evidence": "measured",
+      "note": "Valor 44 - ajuste nominal, nao medicao."
+    },
+    {
+      "address": 4529,
+      "key": "error_code",
+      "name": "Codigo de erro",
+      "type": "int",
+      "unit": null,
+      "scale": 1,
+      "signed": false,
+      "evidence": "documented",
+      "note": "0 em operacao normal. Significado dos bits ainda nao validado."
+    },
+    {
+      "address": 4530,
+      "key": "alarm_code",
+      "name": "Codigo de alarme",
+      "type": "int",
+      "unit": null,
+      "scale": 1,
+      "signed": false,
+      "evidence": "documented"
+    },
+    {
+      "address": 4531,
+      "count": 4,
+      "key": "serial_raw",
+      "name": "Serial (codificacao desconhecida)",
+      "type": "int",
+      "unit": null,
+      "scale": 1,
+      "signed": false,
+      "evidence": "inferred",
+      "note": "5535, 5535, 5535, 55 - lembra o 55355535553555 que o QID devolve, mas nenhum dos dois e o SN do fabricante."
+    },
+    {
+      "address": 4536,
+      "key": "charger_source_priority",
+      "name": "Prioridade de carga",
+      "type": "enum",
+      "unit": null,
+      "scale": 1,
+      "signed": false,
+      "evidence": "documented",
+      "enum": {
+        "0": "Utility",
+        "1": "Solar",
+        "2": "Utility or Solar",
+        "3": "Solar only"
+      },
+      "note": "Enum do schema aberto; nao conferido contra a nuvem deste modelo."
+    },
+    {
+      "address": 4537,
+      "key": "output_source_priority",
+      "name": "Prioridade de saida",
+      "type": "enum",
+      "unit": null,
+      "scale": 1,
+      "signed": false,
+      "evidence": "documented",
+      "enum": {
+        "0": "Utility",
+        "1": "Solar",
+        "2": "SBU",
+        "3": "SUB",
+        "4": "SUF"
+      },
+      "note": "Enum do schema aberto; nao conferido contra a nuvem deste modelo."
+    },
+    {
+      "address": 4539,
+      "key": "battery_type",
+      "name": "Tipo de bateria",
+      "type": "enum",
+      "unit": null,
+      "scale": 1,
+      "signed": false,
+      "evidence": "documented",
+      "enum": {
+        "0": "AGM",
+        "1": "Flooded",
+        "2": "User",
+        "3": "Li1",
+        "4": "Li2",
+        "5": "Li3",
+        "6": "Li4"
+      },
+      "note": "Enum do schema aberto; nao conferido contra a nuvem deste modelo."
+    },
+    {
+      "address": 4541,
+      "key": "max_charge_current",
+      "name": "Corrente maxima de carga",
+      "type": "int",
+      "unit": "A",
+      "scale": 1,
+      "signed": false,
+      "evidence": "measured",
+      "note": "70 A."
+    },
+    {
+      "address": 4546,
+      "key": "battery_bulk_voltage",
+      "name": "Tensao de absorcao (bulk)",
+      "type": "int",
+      "unit": "V",
+      "scale": 0.1,
+      "signed": false,
+      "evidence": "measured",
+      "note": "565 = 56,5 V, igual ao QPIRI e a nuvem."
+    },
+    {
+      "address": 4547,
+      "key": "battery_float_voltage",
+      "name": "Tensao de flutuacao (float)",
+      "type": "int",
+      "unit": "V",
+      "scale": 0.1,
+      "signed": false,
+      "evidence": "measured",
+      "note": "560 = 56,0 V."
+    },
+    {
+      "address": 4548,
+      "key": "battery_cutoff_voltage",
+      "name": "Tensao de corte",
+      "type": "int",
+      "unit": "V",
+      "scale": 0.1,
+      "signed": false,
+      "evidence": "measured",
+      "note": "480 = 48,0 V."
+    },
+    {
+      "address": 4563,
+      "key": "pv2_voltage",
+      "name": "Tensao PV2 (MPPT2)",
+      "type": "float",
+      "unit": "V",
+      "scale": 0.1,
+      "signed": false,
+      "evidence": "measured",
+      "note": "O registro que o PI30 nao expoe. Nuvem PV2 270 V <-> local 286-323 V."
+    },
+    {
+      "address": 4564,
+      "key": "pv2_power",
+      "name": "Potencia PV2 (MPPT2)",
+      "type": "int",
+      "unit": "W",
+      "scale": 1,
+      "signed": false,
+      "evidence": "measured",
+      "note": "Nuvem PV2 509 W <-> local 553-1151 W, acompanhando o sol."
+    },
+    {
+      "address": 4553,
+      "key": "unknown_4553",
+      "name": "Desconhecido (5190)",
+      "type": "int",
+      "unit": null,
+      "scale": 1,
+      "signed": false,
+      "evidence": "inferred",
+      "note": "519,0 V com escala 0.1 - provavel tensao do barramento, nao confirmado."
+    },
+    {
+      "address": 4554,
+      "count": 8,
+      "key": "unknown_energy",
+      "name": "Bloco desconhecido (4554-4561)",
+      "type": "int",
+      "unit": null,
+      "scale": 1,
+      "signed": false,
+      "evidence": "inferred",
+      "note": "7, 11, 11, 50, 0, 0, 5, 1. Parece contador de energia, mas nao foi decodificado."
+    },
+    {
+      "address": 4560,
+      "count": 3,
+      "key": "unknown_4560",
+      "name": "Desconhecido (4560-4562)",
+      "type": "int",
+      "unit": null,
+      "scale": 1,
+      "signed": false,
+      "evidence": "inferred",
+      "note": "5, 1, 0. Nao e corrente do PV2: com 1151 W em 316 V a corrente seria ~3,6 A."
+    }
+  ]
+}

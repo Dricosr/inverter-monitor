@@ -1,0 +1,380 @@
+{
+  "schema_version": 1,
+  "map_key": "pi30_ascii",
+  "title": "PI30 (ASCII) — família Voltronic/Axpert",
+  "description": "Protocolo texto usado pelo MPS 10.2 kW (QMN VMII-NXPW5KW). Vai cru pelo canal transparente (fc=4) do dongle, com CRC e terminador CR.",
+  "transport": {
+    "kind": "pi30_ascii",
+    "framing": "<comando><crc:2><\\r>",
+    "crc": "CRC-16/XMODEM com init 0x0000; some 1 em cada byte de CRC igual a 0x28, 0x0D ou 0x0A",
+    "response_framing": "(<dados><crc:2><\\r>",
+    "nak_format": "(NAKss\\r",
+    "notes": [
+      "CRC com init 0xFFFF gera (NAKss\\r: o inversor rejeita sem explicar.",
+      "QPIGS responde (NAKss de vez em quando quando o dongle atende nuvem e inversor ao mesmo tempo. Repetir resolve.",
+      "O QID deste firmware devolve 55355535553555, que NAO e o SN do fabricante (Q0045529822108191005). Use fc=1 do dongle (quando responde) ou o QMN."
+    ]
+  },
+  "commands_supported": [
+    "QID",
+    "QMOD",
+    "QPI",
+    "QMN",
+    "QVFW",
+    "QVFW2",
+    "QPIRI",
+    "QDI",
+    "QFLAG",
+    "QPIWS",
+    "QMCHGCR",
+    "QMUCHGCR",
+    "QFS",
+    "QPIGS"
+  ],
+  "commands_unsupported": [
+    "QPIRI2",
+    "QPIGS2",
+    "QPIGS3",
+    "QPGS0",
+    "QPGS1",
+    "QPI2",
+    "QSTATUS",
+    "QALL",
+    "QET",
+    "QLT",
+    "QBE",
+    "QPIZ",
+    "QPIC",
+    "QOPPT",
+    "QCVCR",
+    "QDOP",
+    "QEY",
+    "QEM",
+    "QHID"
+  ],
+  "fields": {
+    "QPIGS": {
+      "count": 21,
+      "note": "O firmware preenche 21 campos; 17-20 sao constantes nesta unidade.",
+      "columns": [
+        {
+          "index": 0,
+          "key": "grid_voltage",
+          "name": "Tensao da rede",
+          "type": "float",
+          "unit": "V",
+          "example": "000.0",
+          "evidence": "measured"
+        },
+        {
+          "index": 1,
+          "key": "grid_frequency",
+          "name": "Frequencia da rede",
+          "type": "float",
+          "unit": "Hz",
+          "example": "00.0",
+          "evidence": "measured"
+        },
+        {
+          "index": 2,
+          "key": "output_voltage",
+          "name": "Tensao de saida",
+          "type": "float",
+          "unit": "V",
+          "example": "230.1",
+          "evidence": "measured"
+        },
+        {
+          "index": 3,
+          "key": "output_frequency",
+          "name": "Frequencia de saida",
+          "type": "float",
+          "unit": "Hz",
+          "example": "60.0",
+          "evidence": "measured"
+        },
+        {
+          "index": 4,
+          "key": "output_apparent_power",
+          "name": "Potencia aparente",
+          "type": "int",
+          "unit": "VA",
+          "example": "0482",
+          "evidence": "measured"
+        },
+        {
+          "index": 5,
+          "key": "output_active_power",
+          "name": "Potencia ativa",
+          "type": "int",
+          "unit": "W",
+          "example": "0300",
+          "evidence": "measured"
+        },
+        {
+          "index": 6,
+          "key": "load_percent",
+          "name": "Carga do inversor",
+          "type": "int",
+          "unit": "%",
+          "example": "005",
+          "evidence": "measured"
+        },
+        {
+          "index": 7,
+          "key": "bus_voltage",
+          "name": "Tensao do barramento",
+          "type": "int",
+          "unit": "V",
+          "example": "437",
+          "evidence": "measured"
+        },
+        {
+          "index": 8,
+          "key": "battery_voltage",
+          "name": "Tensao da bateria",
+          "type": "float",
+          "unit": "V",
+          "example": "53.10",
+          "evidence": "measured"
+        },
+        {
+          "index": 9,
+          "key": "charge_current",
+          "name": "Corrente de carga",
+          "type": "int",
+          "unit": "A",
+          "example": "002",
+          "evidence": "measured",
+          "note": "SUBNOTIFICA: com 869 W de PV2 e 417 W de saida reportou 2 A, enquanto o mapa 0925 dizia 7 A."
+        },
+        {
+          "index": 10,
+          "key": "soc",
+          "name": "SOC",
+          "type": "int",
+          "unit": "%",
+          "example": "049",
+          "evidence": "measured"
+        },
+        {
+          "index": 11,
+          "key": "temperature_inverter",
+          "name": "Temperatura do radiador",
+          "type": "int",
+          "unit": "C",
+          "example": "0059",
+          "evidence": "measured"
+        },
+        {
+          "index": 12,
+          "key": "pv_current",
+          "name": "Corrente PV (so MPPT1)",
+          "type": "float",
+          "unit": "A",
+          "example": "00.0",
+          "evidence": "measured"
+        },
+        {
+          "index": 13,
+          "key": "pv_voltage",
+          "name": "Tensao PV (so MPPT1)",
+          "type": "float",
+          "unit": "V",
+          "example": "046.3",
+          "evidence": "measured"
+        },
+        {
+          "index": 14,
+          "key": "battery_voltage_scc",
+          "name": "Tensao da bateria no SCC",
+          "type": "float",
+          "unit": "V",
+          "example": "53.10",
+          "evidence": "measured"
+        },
+        {
+          "index": 15,
+          "key": "discharge_current",
+          "name": "Corrente de descarga",
+          "type": "int",
+          "unit": "A",
+          "example": "00000",
+          "evidence": "measured"
+        },
+        {
+          "index": 16,
+          "key": "status_flags",
+          "name": "Flags de estado",
+          "type": "bits",
+          "unit": null,
+          "example": "00010110",
+          "evidence": "measured",
+          "note": "Bits nao decodificados."
+        },
+        {
+          "index": 17,
+          "key": "reserved_17",
+          "name": "Reservado",
+          "type": "int",
+          "unit": null,
+          "example": "00",
+          "evidence": "measured",
+          "note": "Constante."
+        },
+        {
+          "index": 18,
+          "key": "reserved_18",
+          "name": "Reservado",
+          "type": "int",
+          "unit": null,
+          "example": "00",
+          "evidence": "measured",
+          "note": "Constante."
+        },
+        {
+          "index": 19,
+          "key": "pv_charging_power",
+          "name": "Potencia de carga PV (nao confiavel)",
+          "type": "int",
+          "unit": "W",
+          "example": "00000",
+          "evidence": "rejected",
+          "note": "Fica em 00000 mesmo com o inversor carregando a 13 A. Nao use."
+        },
+        {
+          "index": 20,
+          "key": "device_status",
+          "name": "Estado do dispositivo",
+          "type": "int",
+          "unit": null,
+          "example": "010",
+          "evidence": "measured",
+          "note": "Constante 010 nesta unidade."
+        }
+      ]
+    },
+    "QPIRI": {
+      "note": "Limites de carga. Os campos de potencia nominal vem 0200/0200 (inuteis neste clone).",
+      "columns": [
+        {
+          "index": 0,
+          "key": "nominal_ac_voltage",
+          "unit": "V",
+          "example": "230.0",
+          "name": "Nominal ac voltage",
+          "type": "float",
+          "evidence": "documented"
+        },
+        {
+          "index": 1,
+          "key": "nominal_ac_current",
+          "unit": "A",
+          "example": "44.3",
+          "name": "Nominal ac current",
+          "type": "float",
+          "evidence": "documented"
+        },
+        {
+          "index": 2,
+          "key": "nominal_output_voltage",
+          "unit": "V",
+          "example": "230.0",
+          "name": "Nominal output voltage",
+          "type": "float",
+          "evidence": "documented"
+        },
+        {
+          "index": 3,
+          "key": "nominal_output_frequency",
+          "unit": "Hz",
+          "example": "60.0",
+          "name": "Nominal output frequency",
+          "type": "float",
+          "evidence": "documented"
+        },
+        {
+          "index": 4,
+          "key": "nominal_output_current",
+          "unit": "A",
+          "example": "44.3",
+          "name": "Nominal output current",
+          "type": "float",
+          "evidence": "documented"
+        },
+        {
+          "index": 5,
+          "key": "nominal_apparent_power",
+          "unit": "VA",
+          "example": "0200",
+          "name": "Nominal apparent power",
+          "type": "int",
+          "evidence": "documented"
+        },
+        {
+          "index": 6,
+          "key": "nominal_active_power",
+          "unit": "W",
+          "example": "0200",
+          "name": "Nominal active power",
+          "type": "int",
+          "evidence": "documented"
+        },
+        {
+          "index": 7,
+          "key": "battery_nominal_voltage",
+          "unit": "V",
+          "example": "48.0",
+          "name": "Battery nominal voltage",
+          "type": "float",
+          "evidence": "documented"
+        },
+        {
+          "index": 8,
+          "key": "battery_recharge_voltage",
+          "unit": "V",
+          "example": "48.0",
+          "name": "Battery recharge voltage",
+          "type": "float",
+          "evidence": "documented"
+        },
+        {
+          "index": 9,
+          "key": "battery_redischarge_voltage",
+          "unit": "V",
+          "example": "48.0",
+          "name": "Battery redischarge voltage",
+          "type": "float",
+          "evidence": "documented"
+        },
+        {
+          "index": 10,
+          "key": "battery_bulk_voltage",
+          "unit": "V",
+          "example": "56.5",
+          "name": "Battery bulk voltage",
+          "type": "float",
+          "evidence": "documented"
+        },
+        {
+          "index": 11,
+          "key": "battery_float_voltage",
+          "unit": "V",
+          "example": "56.0",
+          "name": "Battery float voltage",
+          "type": "float",
+          "evidence": "documented"
+        },
+        {
+          "index": 14,
+          "key": "max_charge_current",
+          "unit": "A",
+          "example": "070",
+          "name": "Max charge current",
+          "type": "int",
+          "evidence": "documented"
+        }
+      ]
+    }
+  }
+}

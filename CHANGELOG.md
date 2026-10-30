@@ -3,6 +3,31 @@
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 e versionamento [SemVer](https://semver.org/lang/pt-BR/).
 
+## [1.3.0] — 2026-10-31
+
+### Adicionado
+
+- **`docs/REGISTER-MAPS.md`** — referência dos mapas feita para quem vai reimplementar a
+  leitura em outra linguagem. Traz o transporte (gatilho UDP, frame Eybond, canal `fc=4`),
+  as tabelas completas dos quatro mapas e o **nível de evidência** de cada campo:
+  `medido`, `documentado`, `inferido` ou `descartado`.
+- **`docs/maps/`** — os mesmos mapas como **JSON legível por máquina**
+  (`modbus_a_eg4`, `modbus_b_anenji`, `modbus_0925_smg`, `pi30_ascii`), para uso direto em
+  outras ferramentas. É a fonte da verdade; as tabelas do documento saem deles.
+- **`examples/dump_map.py`** — lê um mapa JSON e imprime os valores do inversor informado.
+  Serve para conferir os mapas contra o próprio equipamento, sem nenhum endereço embutido
+  no código.
+- Seção **"Como descobrir um mapa novo"** com o método que funcionou, na ordem: PI30
+  primeiro, depois o mapa Modbus que o dongle usa para a nuvem, varredura em blocos
+  alinhados, os dois sentidos de byte, slaves 1 a 8, e o fechamento por balanço de energia.
+
+### Registrado por ser armadilha
+
+- O registrador **4527** (nominal de saída em Hz) vale `500` = 50,0 Hz **mesmo com a saída
+  em 60 Hz**: é ajuste nominal, não medição. Use o 4511.
+- Os enums de prioridade (4536/4537) e de tipo de bateria (4539) vêm de esquema aberto e
+  **não** foram conferidos contra a nuvem deste modelo.
+
 ## [1.2.1] — 2026-10-31
 
 ### Alterado
