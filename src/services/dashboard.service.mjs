@@ -174,6 +174,18 @@ export class DashboardService {
         resumeAbove: 55,
         desiredIntensity: 25,
       },
+      {
+        id: 'ainode-power-low-battery',
+        name: 'Desligar o ai-node com bateria baixa',
+        enabled: false,
+        action: 'ainode_power_off',
+        sourceDeviceId: 'anenji-6k2',
+        activateBelow: 30,
+        resumeAbove: 45,
+        // Desligar e irreversivel sem Wake-on-LAN: o gatilho precisa se manter.
+        confirmSeconds: 120,
+        desiredIntensity: null,
+      },
     ];
   }
 }

@@ -3,6 +3,51 @@
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 e versionamento [SemVer](https://semver.org/lang/pt-BR/).
 
+## [1.4.0] — 2026-10-31
+
+### Adicionado
+
+- **Nova ação `ainode_power_off`: desligar o ai-node pelo SOC** e religá-lo por
+  **Wake-on-LAN**. É a única ação sem volta pelo próprio canal — com a máquina desligada
+  não há SSH — então é a mais conservadora de todas:
+  - antes de desligar, arma o WOL (`ethtool -s <iface> wol g`) e **lê de volta**; se não
+    confirmar `Wake-on: g`, **não desliga nada** (falhar sem desligar é aceitável,
+    desligar sem poder religar não é);
+  - confirma que o host realmente caiu (porta 22 fecha) antes de dar a ação como aplicada;
+  - ao religar, envia 3 pacotes mágicos em broadcast e espera o host voltar (até 240 s).
+  - `src/domain/wakeOnLan.mjs` (pacote mágico + envio, sem dependência),
+    `src/services/automation/aiNodePowerActionExecutor.mjs`.
+- **Janela de confirmação por regra (`confirmSeconds`)**: o gatilho precisa se manter para
+  agir. Qualquer leitura falha, velha ou do cache **zera** a contagem; alvo invertido
+  recomeça; a janela fica em `data/automation-state.json` e sobrevive a restart.
+  Confirmar só acontece em transição — com a ação já aplicada a regra apenas realinha.
+- **Leitura confiável obrigatória**: a automação passou a usar `device.online`, a idade do
+  snapshot e o carimbo de cada campo. SOC do cache **nunca** decide nada (novo outcome
+  `sem_leitura`, chip `Sem leitura confiável`).
+- **Backoff de erro** (`errorBackoffSeconds`, 120 s): comando que falhou não é repetido a
+  cada ciclo de 10 s.
+- Campo **Confirmar por (segundos)** e a nova opção no formulário de regra; chip
+  `Confirmando` com contagem no detalhe.
+- `src/domain/confirmationGate.mjs` (lógica pura, testável) e
+  `src/services/automation/aiNodeSsh.mjs` (runner SSH compartilhado com o executor de
+  mineração — as mensagens de erro agora são as mesmas nos dois).
+- Config: `AINODE_HOST/ADDRESS/MAC/IFACE/BROADCAST/WOL_PORT` e
+  `INVERTER_STALE_AFTER_SECONDS`.
+
+### Validado no hardware real
+
+- ciclo completo: desligou em 7 s, ficou fora 62 s e voltou por WOL (o `gate.service`
+  voltou sozinho, com a pausa preservada no Redis);
+- pela regra: gatilho forçado, 120 s de confirmação, `aplicada` com
+  `ai-node desligado (Wake-on-LAN armado em enp8s0)`; ao desabilitar a regra, a liberação
+  religou a máquina por WOL;
+- com o `.106` piscando (dongle em timeout) a regra ficou `Sem leitura confiável` e não
+  agiu — que é exatamente o comportamento desejado.
+
+### Corrigido
+
+- Laço de confirmação: com a ação já aplicada a regra reabria a janela a cada 2 minutos.
+
 ## [1.3.4] — 2026-10-31
 
 ### Corrigido

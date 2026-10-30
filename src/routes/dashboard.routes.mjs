@@ -63,7 +63,7 @@ export function createDashboardRouter(service) {
 }
 
 async function saveRule(response, service, candidate) {
-  const allowedActions = new Set(['gate_pause', 'ep2_mining_reduce', 'ainode_mining_reduce']);
+  const allowedActions = new Set(['gate_pause', 'ep2_mining_reduce', 'ainode_mining_reduce', 'ainode_power_off']);
   if (!candidate?.id || !candidate.name?.trim()) {
     response.status(400);
     throw new Error('id e name sao obrigatorios');
@@ -82,6 +82,12 @@ async function saveRule(response, service, candidate) {
     throw new Error('Faixas invalidas: 0-100 e resumeAbove deve ser maior que activateBelow');
   }
 
+  const confirmSeconds = candidate.confirmSeconds == null ? 0 : Number(candidate.confirmSeconds);
+  if (!Number.isFinite(confirmSeconds) || confirmSeconds < 0 || confirmSeconds > 3600) {
+    response.status(400);
+    throw new Error('confirmSeconds deve ficar entre 0 e 3600');
+  }
+
   const rule = {
     id: String(candidate.id).slice(0, 80),
     name: String(candidate.name).trim().slice(0, 120),
@@ -90,6 +96,7 @@ async function saveRule(response, service, candidate) {
     sourceDeviceId: String(candidate.sourceDeviceId),
     activateBelow,
     resumeAbove,
+    confirmSeconds: Math.round(confirmSeconds),
     desiredIntensity: candidate.desiredIntensity == null ? null : Math.min(100, Math.max(0, Number(candidate.desiredIntensity))),
   };
   await service.saveRule(rule);

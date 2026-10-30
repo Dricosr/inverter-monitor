@@ -19,6 +19,8 @@ const automationService = createAutomationService({
   ep2XmrigConfig: config.ep2XmrigConfig,
   ep2XmrigToken: config.ep2XmrigToken,
   ep2BaseThreads: config.ep2MiningBaseThreads,
+  aiNode: config.aiNode,
+  snapshotStaleAfterSeconds: config.snapshotStaleAfterSeconds,
 });
 
 const dashboardService = new DashboardService({

@@ -244,8 +244,10 @@ então desenha a tela, então o tempo volta a `Há 0 s`. Durante a espera — o 
 **Ações automáticas**
 
 - regras por ação, cada uma com seu inversor de referência e sua faixa de SOC;
-- chip por regra (`Normal`, `Pausado`, `Reduzido`, `Liberada`, `Conflito`, `Falha`,
-  `Desligada`, `Sem leitura`, `Mantida`);
+- chip por regra (`Normal`, `Pausado`, `Reduzido`, `Desligado`, `Liberada`, `Conflito`,
+  `Falha`, `Desligada`, `Sem leitura`, `Mantida`, `Confirmando`, `Sem leitura confiável`);
+- campo **Confirmar por (segundos)** no formulário: `0` age na hora, `120` exige que o
+  gatilho se mantenha por 2 minutos;
 - estado real dos alvos (fila do Gate, threads do XMRig, CPUQuota do ai-node) e hash
   rate de agora, 1 min e 15 min;
 - último resultado de cada regra visível na linha, com o detalhe técnico no tooltip.
@@ -285,7 +287,7 @@ informou aquele campo.
 
 ## Automação por SOC
 
-Três ações independentes, todas disparadas pelo SOC de **um** inversor escolhido em cada
+Quatro ações independentes, todas disparadas pelo SOC de **um** inversor escolhido em cada
 regra:
 
 | Ação | Aplicada quando o SOC cai | Liberada quando o SOC sobe |
@@ -293,9 +295,52 @@ regra:
 | `gate_pause` | `POST /v1/admin/pausar` no Gate (fila de jobs) | `POST /v1/admin/retomar` |
 | `ep2_mining_reduce` | XMRig da EP2 reiniciado com menos threads | restaura as threads do perfil |
 | `ainode_mining_reduce` | `ainode-mining-mode ai <percentual>` via SSH | `ainode-mining-mode normal` |
+| `ainode_power_off` | `systemctl poweroff` no ai-node | religa por **Wake-on-LAN** |
 
-Cada regra tem `activateBelow`, `resumeAbove` e `desiredIntensity` próprios, e todas as
-faixas são configuráveis pela interface (validação: 0–100 e `resumeAbove > activateBelow`).
+Cada regra tem `activateBelow`, `resumeAbove`, `desiredIntensity` e `confirmSeconds`
+próprios, e todos são configuráveis pela interface (validação: 0–100 e
+`resumeAbove > activateBelow`).
+
+### Desligar o ai-node (energia)
+
+A única ação que **não** tem volta pelo próprio canal: com a máquina desligada não há SSH.
+Por isso ela é a mais conservadora das quatro.
+
+| Peça | Como funciona |
+| --- | --- |
+| Gatilho | SOC abaixo de `activateBelow` por `confirmSeconds` **seguidos** |
+| Antes de desligar | roda `ethtool -s enp8s0 wol g` e **lê de volta**; se não confirmar `Wake-on: g`, **não desliga nada** |
+| Desligar | `systemctl poweroff` via SSH; o fim da conexão é o esperado |
+| Confirmar | espera a porta 22 fechar (até 120 s) antes de dar a ação como aplicada |
+| Religar | 3 pacotes mágicos UDP em broadcast para o MAC `00:e0:27:42:70:5b`, depois espera até 240 s o host voltar |
+| Se não voltar | erro explícito: `confira o Wake-on-LAN na BIOS/UEFI` |
+
+> O ai-node também hospeda o Gate. Desligá-lo derruba `/v1/status` e `/v1/mining` junto —
+> o painel mostra o Gate como `Sem resposta` enquanto a máquina estiver fora. O
+> `gate.service` é `enabled` neste host, então volta sozinho no boot; ele trouxe inclusive
+> o estado de pausa (Redis) que estava antes do desligamento.
+
+O armamento do WOL pede `sudo -n ethtool` no host; o desligamento pede `sudo -n
+systemctl poweroff`. Confirme que o `ai-node` aceita essas chamadas sem senha antes de
+habilitar a regra.
+
+### Janela de confirmação (`confirmSeconds`)
+
+O gatilho não age na primeira leitura. Uma nuvem que passa, um pico de consumo ou um
+inversor que pisca não podem desligar uma máquina.
+
+| Fase | Comportamento |
+| --- | --- |
+| Primeira leitura no gatilho | abre a janela (`pending`) e espera |
+| Condição se mantém | conta até `confirmSeconds` e então age |
+| Leitura falha ou fica velha no meio | **zera** a contagem; nada é decidido no escuro |
+| Condição volta ao normal antes do fim | cancela (a janela do alvo oposto começa do zero) |
+| Alvo muda (ligar ↔ desligar) | recomeça a contagem |
+| Ação já está no estado pedido | não confirma de novo: apenas realinha (`alinhada`) |
+| Comando falhou | espera `errorBackoffSeconds` (120 s) antes de tentar outra vez |
+
+A janela fica em `data/automation-state.json` (`pending: { target, since }`), então um
+restart do painel no meio da espera não reinicia a contagem nem a antecipa.
 
 ### Ciclo de vida
 
@@ -303,16 +348,21 @@ O executor roda a cada 10 s (`DASHBOARD_POLL_MS`) e segue sempre o mesmo contrat
 
 | Situação | O que acontece |
 | --- | --- |
-| SOC abaixo de `activateBelow` | aplica a ação (pausa/reduz) |
+| SOC abaixo de `activateBelow` | aplica a ação (pausa/reduz/desliga) |
 | SOC entre os dois limites | mantém o último alvo (histerese), sem alternar |
-| SOC acima de `resumeAbove` | libera (retoma/restaura o máximo) |
-| SOC indisponível | não mexe em nada e mantém o estado aplicado |
+| SOC acima de `resumeAbove` | libera (retoma/restaura o máximo/religa) |
+| SOC indisponível, **do cache** ou de snapshot velho | não mexe em nada, cancela a confirmação e mantém o estado aplicado |
 | regra desabilitada ou excluída | libera o recurso que ela havia aplicado |
 | ação já está no estado desejado | não repete o comando (idempotente) |
-| o comando falhou | registra `Falha` naquela regra sem interromper as outras |
+| o comando falhou | registra `Falha` naquela regra, com backoff, sem interromper as outras |
 
 O estado fica em `data/automation-state.json` e é hidratado no restart: uma ação aplicada
 antes de reiniciar o serviço continua aplicada e é liberada no momento certo.
+
+> **Somente leitura confiável decide.** A automação usa `device.online`, o snapshot do
+> coletor (máximo 120 s) e o carimbo de cada campo: um SOC que veio do cache **nunca**
+> dispara nada — o painel mostra `Sem leitura confiável` e a regra espera a próxima
+> leitura de verdade. Foi essa trava que impediu uma ação com o `.106` piscando em 30/10.
 
 ### Pausa do Gate: posse e conflito
 
@@ -345,9 +395,25 @@ diferença é corrigida no ciclo seguinte.
 Invoke-RestMethod http://192.168.18.150:3070/v1/status | Select-Object -ExpandProperty gate
 Invoke-RestMethod http://127.0.0.1:18092/2/backends | ConvertTo-Json -Depth 4   # threads reais
 ssh ai-node '/usr/local/sbin/ainode-mining-mode status'                        # CPUQuota
+ssh ai-node 'sudo -n ethtool enp8s0 | grep Wake-on'                           # WOL armado?
 
 # o que a automação decidiu/aplicou
 Invoke-RestMethod http://127.0.0.1:3071/api/dashboard | Select-Object -ExpandProperty execution
+```
+
+Testar o desligamento/religamento sem esperar o SOC cair (o `ai-node` vai desligar de
+verdade, e o Gate cai junto):
+
+```powershell
+# desliga agora, sem passar pela regra
+ssh ai-node 'sudo -n ethtool -s enp8s0 wol g; sudo -n ethtool enp8s0 | grep Wake-on; sudo -n systemctl poweroff'
+
+# e religa de outro terminal
+$mac = '00-e0-27-42-70-5b'   # 3 pacotes magicos em broadcast
+0..2 | ForEach-Object {
+  $b = [byte[]](,0xFF * 6) + (([byte[]]($mac -split '-')) * 16)
+  (New-Object System.Net.Sockets.UdpClient).Send($b, $b.Length, '192.168.18.255', 9) | Out-Null
+}
 ```
 
 ## Quando um inversor fica offline
@@ -410,9 +476,21 @@ o próprio aparelho o informa, é lido automaticamente (registradores 186–192 
 Variáveis de ambiente do painel: `PORT` (3071), `HOST`, `INVERTER_COLLECTOR_URL`,
 `INVERTER_SNAPSHOT_FILE`, `INVERTER_DASHBOARD_FILE`, `INVERTER_DEVICES_FILE`,
 `INVERTER_COLLECTOR_REFRESH_URL` (padrão: derivado da URL de status),
+`INVERTER_STALE_AFTER_SECONDS` (120 — acima disso o snapshot inteiro é "velho"),
 `DASHBOARD_POLL_MS` (10000), `GATE_BASE_URL`, `EP2_XMRIG_URL`, `EP2_XMRIG_CONFIG`,
 `EP2_XMRIG_TOKEN`, `EP2_MINING_BASE_THREADS` (30), `AUTOMATION_ENABLED` (true),
 `AUTOMATION_STATE_FILE`.
+
+Variáveis do ai-node (usadas pela ação `ainode_power_off`):
+
+| Variável | Padrão | Para quê |
+| --- | --- | --- |
+| `AINODE_HOST` | `ai-node` | alias SSH usado nos comandos |
+| `AINODE_ADDRESS` | `192.168.18.150` | usado para saber se a máquina está de pé (porta 22) |
+| `AINODE_MAC` | `00:e0:27:42:70:5b` | MAC do Wake-on-LAN |
+| `AINODE_IFACE` | `enp8s0` | interface onde o WOL é armado |
+| `AINODE_BROADCAST` | `192.168.18.255` | endereço do pacote mágico |
+| `AINODE_WOL_PORT` | `9` | porta UDP do pacote mágico |
 
 ## Linha de comando
 

@@ -14,6 +14,7 @@ const elements = {
   ruleDialogTitle: document.querySelector('#rule-dialog-title'),
   ruleHint: document.querySelector('#rule-hint'),
   ruleIntensityField: document.querySelector('#rule-intensity-field'),
+  ruleConfirmField: document.querySelector('#rule-confirm-field'),
   rulePreview: document.querySelector('#rule-preview'),
   ruleError: document.querySelector('#rule-error'),
   toast: document.querySelector('#toast'),
@@ -56,6 +57,11 @@ const ACTION_HINTS = {
   ainode_mining_reduce: {
     target: 'ai-node',
     text: 'Limita a CPU do XMRig do ai-node por cgroup, na intensidade escolhida abaixo.',
+  },
+  ainode_power_off: {
+    target: 'ai-node',
+    text: 'Desliga o ai-node (que hospeda o Gate) e religa por Wake-on-LAN quando o SOC subir. '
+      + 'Só age com leitura fresca e depois do tempo de confirmação.',
   },
 };
 
@@ -583,7 +589,7 @@ function renderRules(dashboard) {
             <h3>${escapeHtml(rule.name)}</h3>
             <span class="chip chip--muted">${escapeHtml(actionTarget(rule.action))}</span>
           </div>
-          <p class="rule-range">Liga abaixo de <strong>${rule.activateBelow}%</strong> · desliga acima de <strong>${rule.resumeAbove}%</strong></p>
+          <p class="rule-range">Liga abaixo de <strong>${rule.activateBelow}%</strong> · desliga acima de <strong>${rule.resumeAbove}%</strong>${Number(rule.confirmSeconds) > 0 ? ` · confirma por <strong>${rule.confirmSeconds}s</strong>` : ''}</p>
         </div>
         <div class="rule-status">
           <span class="chip chip--${status.tone}">${escapeHtml(status.label)}</span>
@@ -615,6 +621,24 @@ function ruleState(rule, execution, source) {
   }
   if (execution?.outcome === 'conflito') {
     return { tone: 'warn', label: 'Conflito', note: `Fila pausada por outro comando · ${where}`, title };
+  }
+  // Janela de confirmacao em andamento: o gatilho esta ativo, mas ainda nao agiu.
+  if (execution?.outcome === 'confirmando') {
+    return {
+      tone: 'warn',
+      label: 'Confirmando',
+      note: detail || `${where} · aguardando confirmação`,
+      title,
+    };
+  }
+  // Leitura velha/ausente: a automacao para de propósito em vez de decidir no escuro.
+  if (execution?.outcome === 'sem_leitura') {
+    return {
+      tone: 'warn',
+      label: 'Sem leitura confiável',
+      note: detail || 'aguardando leitura fresca do inversor',
+      title,
+    };
   }
   // Inversor de referencia fora do ar: sem SOC nao se decide nada, e o estado atual
   // e mantido de proposito (nao libera nem intensifica as cegas).
@@ -649,17 +673,23 @@ function ruleState(rule, execution, source) {
 }
 
 function activeLabel(action) {
-  return action === 'gate_pause' ? 'Pausado' : 'Reduzido';
+  return action === 'gate_pause' ? 'Pausado' : action === 'ainode_power_off' ? 'Desligado' : 'Reduzido';
 }
 
 function activeNote(rule) {
   if (rule.action === 'gate_pause') return 'Fila pausada';
+  if (rule.action === 'ainode_power_off') return 'ai-node desligado';
   const intensity = Number(rule.desiredIntensity);
   return Number.isFinite(intensity) ? `Minerador em ${intensity}%` : 'Minerador reduzido';
 }
 
 function actionTarget(action) {
-  return { gate_pause: 'Gate', ep2_mining_reduce: 'EP2', ainode_mining_reduce: 'ai-node' }[action] ?? action;
+  return {
+    gate_pause: 'Gate',
+    ep2_mining_reduce: 'EP2',
+    ainode_mining_reduce: 'ai-node',
+    ainode_power_off: 'ai-node',
+  }[action] ?? action;
 }
 
 function originLabel(pausedBy) {
@@ -758,6 +788,7 @@ function openRule(id) {
     action: 'gate_pause',
     activateBelow: 50,
     resumeAbove: 55,
+    confirmSeconds: 0,
     desiredIntensity: 25,
     enabled: false,
   };
@@ -768,6 +799,7 @@ function openRule(id) {
   document.querySelector('#rule-action').value = rule.action;
   document.querySelector('#rule-activate').value = rule.activateBelow;
   document.querySelector('#rule-resume').value = rule.resumeAbove;
+  document.querySelector('#rule-confirm').value = rule.confirmSeconds ?? 0;
   document.querySelector('#rule-intensity').value = rule.desiredIntensity ?? '';
 
   const source = document.querySelector('#rule-source');
@@ -787,17 +819,20 @@ function syncRuleDialog() {
   const hint = ACTION_HINTS[action];
   elements.ruleHint.innerHTML = `<span class="chip chip--muted">${escapeHtml(hint.target)}</span><p>${escapeHtml(hint.text)}</p>`;
 
-  const usesIntensity = action !== 'gate_pause';
+  const usesIntensity = action === 'ep2_mining_reduce' || action === 'ainode_mining_reduce';
   elements.ruleIntensityField.hidden = !usesIntensity;
+  elements.ruleConfirmField.hidden = false;
   elements.ruleIntensityField.closest('.form-grid').classList.toggle('two', !usesIntensity);
 
   const activate = Number(document.querySelector('#rule-activate').value);
   const resume = Number(document.querySelector('#rule-resume').value);
+  const confirm = Number(document.querySelector('#rule-confirm').value) || 0;
   const valid = Number.isFinite(activate) && Number.isFinite(resume) && resume > activate;
 
   elements.rulePreview.classList.toggle('invalid', !valid);
+  const wait = confirm > 0 ? ` Depois de ${confirm}s mantendo a condição, age.` : '';
   elements.rulePreview.textContent = valid
-    ? `Abaixo de ${activate}% liga · entre ${activate}% e ${resume}% mantém · a partir de ${resume}% desliga.`
+    ? `Abaixo de ${activate}% liga · entre ${activate}% e ${resume}% mantém · a partir de ${resume}% desliga.${wait}`
     : 'O limite de desligar precisa ser maior que o de ligar.';
 }
 
@@ -814,6 +849,7 @@ async function saveRule(event) {
     action: document.querySelector('#rule-action').value,
     activateBelow: Number(document.querySelector('#rule-activate').value),
     resumeAbove: Number(document.querySelector('#rule-resume').value),
+    confirmSeconds: Number(document.querySelector('#rule-confirm').value) || 0,
     desiredIntensity: document.querySelector('#rule-intensity').value === ''
       ? null
       : Number(document.querySelector('#rule-intensity').value),

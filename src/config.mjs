@@ -25,4 +25,13 @@ export const config = {
   automationEnabled: (process.env.AUTOMATION_ENABLED ?? 'true').toLowerCase() !== 'false',
   automationStateFile: process.env.AUTOMATION_STATE_FILE || path.join(rootDir, 'data', 'automation-state.json'),
   ep2MiningBaseThreads: Number(process.env.EP2_MINING_BASE_THREADS || 30),
+  aiNode: {
+    host: process.env.AINODE_HOST || 'ai-node',
+    address: process.env.AINODE_ADDRESS || '192.168.18.150',
+    mac: process.env.AINODE_MAC || '00:e0:27:42:70:5b',
+    iface: process.env.AINODE_IFACE || 'enp8s0',
+    broadcast: process.env.AINODE_BROADCAST || '192.168.18.255',
+    wolPort: numberFromEnv('AINODE_WOL_PORT', 9),
+  },
+  snapshotStaleAfterSeconds: numberFromEnv('INVERTER_STALE_AFTER_SECONDS', 120),
 };

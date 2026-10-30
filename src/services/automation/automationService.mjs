@@ -1,10 +1,12 @@
 import { readFile } from 'node:fs/promises';
 import { StatusNormalizer } from '../../domain/statusNormalizer.mjs';
 import { parseJsonSafe } from '../../domain/jsonSafe.mjs';
+import { advanceConfirmation } from '../../domain/confirmationGate.mjs';
 import { JsonStore } from '../jsonStore.service.mjs';
 import { GateActionExecutor } from './gateActionExecutor.mjs';
 import { Ep2MiningActionExecutor } from './ep2MiningActionExecutor.mjs';
 import { AiNodeMiningActionExecutor } from './aiNodeMiningActionExecutor.mjs';
+import { AiNodePowerActionExecutor } from './aiNodePowerActionExecutor.mjs';
 
 export function createAutomationService(options) {
   return new AutomationService(options);
@@ -24,9 +26,13 @@ export class AutomationService {
     ep2XmrigUrl,
     ep2XmrigConfig,
     ep2XmrigToken,
+    aiNode = {},
+    snapshotStaleAfterSeconds = 120,
+    errorBackoffSeconds = 120,
     executors,
     rulesProvider,
     deviceProvider,
+    now = () => Date.now(),
   }) {
     this.enabled = enabled;
     this.dashboardFile = dashboardFile;
@@ -34,6 +40,9 @@ export class AutomationService {
     this.snapshotFile = snapshotFile;
     this.collectorUrl = collectorUrl;
     this.pollMs = pollMs;
+    this.snapshotStaleAfterSeconds = snapshotStaleAfterSeconds;
+    this.errorBackoffSeconds = errorBackoffSeconds;
+    this.now = now;
     this.normalizer = new StatusNormalizer();
     this.stateStore = new JsonStore(stateFile, { actions: {}, updatedAt: null });
     this.executors = executors ?? {
@@ -43,7 +52,8 @@ export class AutomationService {
         configPath: ep2XmrigConfig,
         token: ep2XmrigToken,
       }),
-      ainode_mining_reduce: new AiNodeMiningActionExecutor(),
+      ainode_mining_reduce: new AiNodeMiningActionExecutor(aiNode.host),
+      ainode_power_off: new AiNodePowerActionExecutor(aiNode),
     };
     this.rulesProvider = rulesProvider ?? (async () => {
       const settings = JSON.parse(await readFile(this.dashboardFile, 'utf8'));
@@ -96,39 +106,101 @@ export class AutomationService {
 
   async #applyRule(rule, devices) {
     const source = devices.find((device) => device.id === rule.sourceDeviceId);
-    const soc = Number(source?.soc);
-    if (!Number.isFinite(soc)) {
+    const previous = this.status[rule.id] ?? {};
+    const reading = this.#reliableSoc(source);
+
+    // Leitura que nao da para confiar cancela a confirmacao em andamento: esperar
+    // com dado velho seria esperar por nada. O estado aplicado nao e tocado.
+    if (reading.soc == null) {
       return this.#record(rule, {
-        mode: this.status[rule.id]?.mode ?? 'indeterminado',
+        mode: previous.mode ?? 'indeterminado',
         soc: null,
-        action: { changed: false, applied: this.status[rule.id]?.applied === true, detail: 'SOC de referencia indisponivel' },
-        outcome: 'indeterminada',
+        pending: null,
+        action: {
+          changed: false,
+          applied: previous.applied === true,
+          owned: previous.owned === true,
+          pausedAt: previous.pausedAt ?? null,
+          detail: `leitura nao confiavel: ${reading.reason}`,
+        },
+        outcome: 'sem_leitura',
       });
     }
 
+    const soc = reading.soc;
     const activateBelow = Number(rule.activateBelow);
     const resumeAbove = Number(rule.resumeAbove);
-    const hold = this.status[rule.id]?.mode;
+    const hold = previous.mode;
     let target;
     if (soc < activateBelow) target = 'active';
     else if (soc >= resumeAbove) target = 'inactive';
     else target = hold === 'active' ? 'active' : 'inactive';
+
+    const confirmSeconds = Math.max(0, Math.floor(Number(rule.confirmSeconds) || 0));
+    // Confirmacao so em transicao. Se o ciclo anterior ja deixou a acao no estado
+    // pedido (`alinhada`/`aplicada`), esperar de novo so gera ruido — era o que fazia
+    // a regra reabrir a janela a cada 2 minutos com a maquina ja desligada.
+    const settled = (previous.outcome === 'aplicada' || previous.outcome === 'alinhada')
+      && previous.mode === target
+      && previous.applied === (target === 'active');
+    const gate = advanceConfirmation({
+      target,
+      pending: previous.pending ?? null,
+      now: this.now(),
+      confirmSeconds: settled ? 0 : confirmSeconds,
+    });
+    if (gate.action === 'wait') {
+      return this.#record(rule, {
+        mode: target,
+        soc,
+        pending: gate.pending,
+        action: {
+          changed: false,
+          applied: previous.applied === true,
+          owned: previous.owned === true,
+          pausedAt: previous.pausedAt ?? null,
+          detail: `gatilho ativo ha ${gate.waitedSeconds}s · confirma em ${gate.remainingSeconds}s`,
+        },
+        outcome: 'confirmando',
+      });
+    }
 
     const executor = this.executors[rule.action];
     if (!executor) {
       return this.#record(rule, {
         mode: target,
         soc,
+        pending: null,
         action: { changed: false, applied: false, detail: 'Atividade nao suportada' },
         outcome: 'erro',
       });
     }
 
+    // Falhou antes? Espera o backoff em vez de martelar o alvo a cada ciclo.
+    const backoff = this.#backoffRemaining(previous);
+    if (backoff > 0) {
+      return this.#record(rule, {
+        mode: target,
+        soc,
+        pending: null,
+        action: {
+          changed: false,
+          applied: previous.applied === true,
+          owned: previous.owned === true,
+          pausedAt: previous.pausedAt ?? null,
+          detail: `tentativa anterior falhou · nova tentativa em ${backoff}s`,
+        },
+        outcome: 'erro',
+        keepFailedAt: true,
+      });
+    }
+
     try {
-      const action = await executor.apply(target, rule.desiredIntensity, { previous: this.status[rule.id] });
+      const action = await executor.apply(target, rule.desiredIntensity, { previous });
       this.#record(rule, {
         mode: target,
         soc,
+        pending: null,
         action,
         outcome: action.conflict ? 'conflito' : action.changed ? 'aplicada' : 'alinhada',
       });
@@ -137,10 +209,43 @@ export class AutomationService {
       this.#record(rule, {
         mode: target,
         soc,
-        action: { changed: false, applied: false, detail: error.message },
+        pending: null,
+        action: { changed: false, applied: previous.applied === true, detail: error.message },
         outcome: 'erro',
+        failed: true,
       });
     }
+  }
+
+  /**
+   * O SOC so vale se veio de uma leitura de agora.
+   *
+   * Antes desta checagem uma leitura de 5 minutos atras (cache do coletor) decidia a
+   * automacao — e desligar uma maquina por causa disso seria irreversivel.
+   */
+  #reliableSoc(device) {
+    if (!device) return { soc: null, reason: 'inversor de referencia nao configurado' };
+    const soc = Number(device.soc);
+    if (!Number.isFinite(soc)) return { soc: null, reason: 'SOC indisponivel' };
+    if (device.online === false) return { soc: null, reason: 'inversor sem resposta' };
+    if (device.snapshotStale) {
+      const age = device.stale?.ageSeconds;
+      return { soc: null, reason: `snapshot com ${age == null ? '?' : `${age}s`} de atraso` };
+    }
+    const staleFields = device.stale?.fields ?? {};
+    if (Object.prototype.hasOwnProperty.call(staleFields, 'battery.soc')) {
+      return { soc: null, reason: `SOC veio do cache (${staleFields['battery.soc']}s)` };
+    }
+    return { soc, reason: null };
+  }
+
+  #backoffRemaining(record) {
+    if (!record?.failedAt || !this.errorBackoffSeconds) return 0;
+    const failedAt = Date.parse(record.failedAt);
+    if (!Number.isFinite(failedAt)) return 0;
+    const elapsed = (this.now() - failedAt) / 1000;
+    if (elapsed >= this.errorBackoffSeconds) return 0;
+    return Math.ceil(this.errorBackoffSeconds - elapsed);
   }
 
   async #releaseOrphans(rules) {
@@ -180,7 +285,11 @@ export class AutomationService {
       this.#loadSnapshot(),
     ]);
     const config = JSON.parse(configRaw);
-    return this.normalizer.normalize(snapshotRaw, config);
+    // A idade do snapshot entra aqui pela mesma razao que no painel: com o coletor
+    // parado, nenhum valor da tela (nem da automacao) e de agora.
+    return this.normalizer.normalize(snapshotRaw, config, {
+      staleAfterSeconds: this.snapshotStaleAfterSeconds,
+    });
   }
 
   async #loadSnapshot() {
@@ -193,8 +302,9 @@ export class AutomationService {
     }
   }
 
-  #record(rule, { mode, soc, action, outcome }) {
-    this.status[rule.id] = {
+  #record(rule, { mode, soc, action, outcome, pending = undefined, failed = false, keepFailedAt = false }) {
+    const previous = this.status[rule.id] ?? {};
+    const record = {
       ruleId: rule.id,
       action: rule.action,
       mode,
@@ -206,6 +316,14 @@ export class AutomationService {
       outcome,
       updatedAt: new Date().toISOString(),
     };
+    // `pending` e o estado da janela de confirmacao: vai para o disco para sobreviver
+    // a um reinicio do painel no meio da espera.
+    if (pending !== undefined) record.pending = pending;
+    else if (previous.pending) record.pending = previous.pending;
+    if (failed) record.failedAt = new Date(this.now()).toISOString();
+    else if (keepFailedAt && previous.failedAt) record.failedAt = previous.failedAt;
+    if (outcome === 'aplicada' || outcome === 'alinhada') delete record.failedAt;
+    this.status[rule.id] = record;
   }
 
   async #saveStatus() {
