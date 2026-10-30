@@ -3,6 +3,27 @@
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 e versionamento [SemVer](https://semver.org/lang/pt-BR/).
 
+## [1.3.2] — 2026-10-31
+
+### Corrigido
+
+- **O `.106` aparecia como offline em cerca de metade dos ciclos, com o Modbus
+  respondendo.** O canal ASCII desse modelo devolve `(NAKss` ou resposta vazia quando o
+  dongle atende a nuvem no meio da leitura. Isso chega ao transporte como **sucesso**, e
+  o `_pi30_ask` só repetia em erro de transporte — a repetição documentada nunca
+  acontecia de fato. Agora a checagem é no **conteúdo** (`_pi30_usable`): resposta vazia
+  ou em NAK conta como tentativa perdida, com espera crescente (0,3 s → 0,6 s).
+- **Leitura degradada em vez de offline.** Se o ASCII falhar mesmo depois das
+  repetições, o `pi30_smg` monta a leitura **só com o mapa 0925** (PV1/PV2, bateria,
+  saída, carga e códigos de erro). O painel continua com dados vivos; apenas modo,
+  temperatura e tensão de barramento aparecem como `—`, porque só existem no ASCII.
+  Medido depois da correção: **8 ciclos seguidos online** (antes, ~50% falhavam).
+
+### Adicionado
+
+- `_pi30_usable()`, `_smg_base()` e `_smg_only()` no coletor, com testes de repetição em
+  NAK/vazio e de queda para o 0925 (`tests/test_parsers.py`).
+
 ## [1.3.1] — 2026-10-31
 
 ### Corrigido

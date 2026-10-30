@@ -228,7 +228,13 @@ de saída) ÷ 53,4 V pedia **8,5 A** — ou seja, o 0925 estava certo e o PI30 e
 - `pv.mppt_unreadable` fica vazio e `pv.power` é a soma das duas entradas;
 - bateria, saída e carga passam a vir do 0925, que é a fonte da nuvem; o rótulo
   `(parcial)` desaparece e o `pv.dc_balance` passa a fechar com as perdas;
-- se o 0925 não responder, o leitor volta ao PI30 puro e a UI marca o MPPT2 como
+- **NAK e resposta vazia são repetidos**, não aceitos: o transporte devolve `(NAKss` como
+  resposta válida, então a checagem é feita no conteúdo (`_pi30_usable`), com espera
+  crescente entre as tentativas;
+- se o ASCII falhar mesmo depois das repetições, a leitura **segue só com o 0925**
+  (PV, bateria, saída e carga; sem modo, temperatura e barramento) em vez de marcar o
+  inversor como offline — foi o que tirou o `.106` do falso *offline* em metade dos ciclos;
+- se o 0925 também não responder, o leitor volta ao PI30 puro e a UI marca o MPPT2 como
   `não exposto` — nada quebra.
 
 ## 5. Modbus RTU — mapa A (EG4 3000EHV)

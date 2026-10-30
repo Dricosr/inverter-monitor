@@ -54,7 +54,7 @@ DONGLE_UDP_PORT = 58899
 LOCAL_TCP_PORT = 8899  # porta em que o dongle conecta de volta (fixa no firmware)
 CLOUD_RECOVERY_DELAY = 1.5
 
-__version__ = "1.3.1"
+__version__ = "1.3.2"
 
 log = logging.getLogger("inverter")
 
@@ -600,21 +600,31 @@ def parse_qpigs(raw: str, mode_letter: str = "?", serial: str | None = None) -> 
     }
 
 
+def _pi30_usable(raw: str) -> bool:
+    """Resposta que serve: veio completa e o inversor nao recusou o comando."""
+    return raw.startswith("(") and not raw.startswith("(NAK") and len(raw) >= 4
+
+
 def _pi30_ask(link: Dongle, command: bytes, timeout: float, attempts: int = 3) -> str:
     """Envia um comando ASCII e devolve o texto da resposta.
 
-    O `.106` responde `(NAKss` de forma intermitente quando o dongle esta atendendo a
-    nuvem e o inversor ao mesmo tempo, e a leitura seguinte ja voltava boa. Repetir sai
-    mais barato do que marcar o inversor como offline por um NAK passageiro.
+    O `.106` responde `(NAKss` ou vazio de forma intermitente quando o dongle esta
+    atendendo a nuvem e o inversor ao mesmo tempo. Isso chega como resposta valida no
+    transporte, entao a checagem tem que ser no conteudo: repetir sai mais barato do
+    que marcar o inversor como offline por um NAK passageiro.
     """
     last: Exception | None = None
     for attempt in range(1, attempts + 1):
         try:
-            return link.ask(4, pi30(command), timeout=timeout).decode("ascii", "replace")
+            raw = link.ask(4, pi30(command), timeout=timeout).decode("ascii", "replace")
         except Exception as exc:  # noqa: BLE001 - timeout tambem merece nova tentativa
             last = exc
-            if attempt < attempts:
-                time.sleep(0.25)
+        else:
+            if _pi30_usable(raw):
+                return raw
+            last = ValueError(f"resposta inutil do inversor: {raw!r}")
+        if attempt < attempts:
+            time.sleep(0.3 * attempt)
     raise last if last else RuntimeError("sem resposta")
 
 
@@ -717,9 +727,68 @@ def merge_modbus_smg(data: dict, smg: dict) -> dict:
     return data
 
 
+def _smg_base() -> dict:
+    """Esqueleto de leitura no formato do `QPIGS`, para quando so o 0925 respondeu."""
+    return {
+        "protocol": "pi30_smg",
+        "mode": None,
+        "serial": None,
+        "battery": {
+            "soc": None, "voltage": None, "current_charge": None,
+            "current_discharge": None, "power": None, "voltage_scc": None,
+            "current_partial": True,
+        },
+        "pv": {
+            "mppt": 1, "mppt_count": 2, "mppt_unreadable": [],
+            "voltage": None, "current": None, "power": None,
+            "inputs": [_pv_input(1, None, None, None), _pv_input(2, None, None, None)],
+        },
+        "grid": {"voltage": None, "frequency": None},
+        "output": {"voltage": None, "frequency": None,
+                   "apparent_power": None, "active_power": None},
+        "load_percent": None,
+        "bus_voltage": None,
+        "temperature": {"inverter": None},
+    }
+
+
+def _smg_only(smg: dict) -> dict:
+    """Leitura feita apenas com o mapa 0925 (o canal ASCII nao respondeu)."""
+    data = _smg_base()
+    voltage = smg.get("pv1")
+    power = smg.get("pv1_power")
+    current = None
+    source = None
+    if voltage and power is not None and voltage > 0:
+        current = round(power / voltage, 1)
+        source = "derivada (W ÷ V) — o firmware nao expoe a corrente"
+    entrada = _pv_input(1, voltage, current, None if power is None else float(power))
+    entrada["power_source"] = "modbus 0925 (reg 4505)"
+    entrada["current_source"] = source
+    data["pv"]["inputs"][0] = entrada
+    data["pv"]["voltage"] = voltage
+    data["pv"]["current"] = current
+    data["pv"]["power"] = entrada["power"]
+    return merge_modbus_smg(data, smg)
+
+
 def read_pi30_smg(link: Dongle) -> dict:
-    """PI30 (ASCII) + mapa 0925. O 0925 e opcional: sem ele, volta ao PI30 puro."""
-    data = read_pi30(link)
+    """PI30 (ASCII) + mapa 0925, com queda para o 0925 puro.
+
+    O ASCII deste modelo responde `(NAKss` ou vazio em parte dos ciclos, porque o
+    dongle atende a nuvem no meio da leitura. O mapa 0925 e Modbus e nao sofre
+    disso, entao uma falha do ASCII nao pode marcar o inversor como offline: o
+    painel continua com PV, bateria e saida, so sem modo, temperatura e barramento.
+    """
+    try:
+        data = read_pi30(link)
+    except Exception as exc:  # noqa: BLE001
+        log.debug("PI30 falhou (%s); tentando so o mapa 0925", exc)
+        try:
+            return _smg_only(read_modbus_smg(link))
+        except Exception as smg_exc:  # noqa: BLE001
+            log.debug("mapa 0925 tambem falhou: %s", smg_exc)
+            raise exc
     try:
         smg = read_modbus_smg(link)
     except Exception as exc:  # noqa: BLE001

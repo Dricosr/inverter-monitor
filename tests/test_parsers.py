@@ -390,6 +390,98 @@ class TestParsePi30(unittest.TestCase):
         self.assertEqual(d["battery"]["soc"], 0)
 
 
+class _FakeLink:
+    """Dongle falso: devolve respostas na ordem em que foi chamado."""
+
+    def __init__(self, replies):
+        self.replies = list(replies)
+        self.sent = []
+
+    def ask(self, fc, payload, timeout=None):  # noqa: ARG002
+        self.sent.append(payload)
+        item = self.replies.pop(0) if self.replies else b"(NAKss\r"
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+
+QPIGS_OK = b"(000.0 00.0 229.8 60.0 0482 0300 005 437 53.10 004 049 0059 00.0 045.3 53.10 00000 00010110 00 00 00000 010\xd8\x7e\r"
+
+
+class TestRepeticaoPi30(unittest.TestCase):
+    """O `.106` recusa comando (NAK) ou devolve vazio em parte dos ciclos."""
+
+    def test_repetir_depois_de_nak(self):
+        link = _FakeLink([b"(NAKss\r", QPIGS_OK])
+        raw = im._pi30_ask(link, b"QPIGS", timeout=1, attempts=2)
+        self.assertTrue(raw.startswith("(000.0"))
+        self.assertEqual(len(link.sent), 2)
+
+    def test_repetir_depois_de_resposta_vazia(self):
+        link = _FakeLink([b"", QPIGS_OK])
+        raw = im._pi30_ask(link, b"QPIGS", timeout=1, attempts=2)
+        self.assertTrue(raw.startswith("(000.0"))
+
+    def test_desiste_depois_das_tentativas(self):
+        link = _FakeLink([b"(NAKss\r", b"(NAKss\r"])
+        with self.assertRaises(ValueError):
+            im._pi30_ask(link, b"QPIGS", timeout=1, attempts=2)
+
+    def test_resposta_curta_do_modo_e_aceita(self):
+        # `QMOD` responde apenas `(B` + CRC + CR: curta, mas util.
+        link = _FakeLink([b"(B\xe7\xc9\r"])
+        self.assertTrue(im._pi30_ask(link, b"QMOD", timeout=1, attempts=1).startswith("(B"))
+
+
+class TestQuedaParaOMapa0925(unittest.TestCase):
+    """Sem ASCII, o 0925 sozinho ainda entrega PV, bateria e saida."""
+
+    LIVE = {
+        4501: 3, 4502: 0, 4503: 0, 4504: 453, 4505: 0, 4506: 531, 4507: 49,
+        4508: 4, 4509: 0, 4510: 2297, 4511: 600, 4512: 529, 4513: 321, 4514: 5,
+        4517: 520, 4518: 15202, 4521: 10200, 4522: 10200, 4529: 0, 4530: 0,
+        4563: 3051, 4564: 568,
+    }
+
+    def _link(self):
+        regs = [self.LIVE.get(im.SMG_BASE + i, 0) for i in range(im.SMG_COUNT)]
+        data = b"".join(bytes([r & 0xFF, (r >> 8) & 0xFF]) for r in regs)
+        bloco = bytes([im.SMG_SLAVE, 3, len(data)]) + data
+        qpigs = im.pi30(b"QPIGS")
+        modbus = im.rtu_read(im.SMG_SLAVE, im.SMG_BASE, im.SMG_COUNT)
+
+        class Link:
+            def ask(self, fc, payload, timeout=None):  # noqa: ARG002
+                if payload in (qpigs, im.pi30(b"QMOD"), im.pi30(b"QID")):
+                    raise TimeoutError("sem resposta")
+                assert payload == modbus, payload.hex()
+                return bloco
+
+        return Link()
+
+    def test_le_sem_o_ascii(self):
+        d = im.read_pi30_smg(self._link())
+        self.assertEqual(d["protocol"], "pi30_smg")
+        self.assertIsNone(d["mode"], "modo e temperatura so existem no ASCII")
+        self.assertAlmostEqual(d["battery"]["voltage"], 53.1)
+        self.assertEqual(d["battery"]["soc"], 49)
+        self.assertEqual(d["battery"]["current_charge"], 4.0)
+        self.assertEqual(d["output"]["active_power"], 321)
+        self.assertAlmostEqual(d["pv"]["voltage2"], 305.1)
+        self.assertEqual(d["pv"]["power"], 568.0)
+        self.assertTrue(d["pv"]["inputs"][0]["readable"])
+        self.assertEqual(d["pv"]["inputs"][0]["power"], 0.0)
+        self.assertEqual(d["smg"]["cpu_version"], 15202)
+
+    def test_falha_dos_dois_lados_ainda_levanta(self):
+        class Link:
+            def ask(self, fc, payload, timeout=None):  # noqa: ARG002
+                raise TimeoutError("sem resposta")
+
+        with self.assertRaises(TimeoutError):
+            im.read_pi30_smg(Link())
+
+
 class TestPlausibilidade(unittest.TestCase):
     def test_valores_ok(self):
         self.assertTrue(im._plausible({"battery": {"soc": 50, "voltage": 52.0}}))

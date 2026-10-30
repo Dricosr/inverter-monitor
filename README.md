@@ -178,8 +178,19 @@ também a corrente real da bateria.
 A energia fecha: 876 W de PV2 − 348 W de saída = 528 W para a bateria ⇒ 9,9 A a 53,4 V,
 contra 9 A medidos. O mesmo cálculo com o `QPIGS` dava 3 A — errado.
 
-O painel mostra os dois visores com valores reais e o total soma as duas entradas. Se o
-0925 não responder, o leitor volta ao PI30 puro e o MPPT2 volta a aparecer como
+O painel mostra os dois visores com valores reais e o total soma as duas entradas.
+
+**O canal ASCII deste modelo falha em parte dos ciclos** — o dongle atende a nuvem no
+meio da leitura e o inversor responde `(NAKss` ou vazio. Duas defesas:
+
+1. o comando é repetido quando a resposta vem vazia ou em NAK (o transporte entrega isso
+   como sucesso, então a checagem é no conteúdo);
+2. se ainda assim o ASCII falhar, a leitura segue **só com o mapa 0925** — PV, bateria e
+   saída continuam no painel, apenas sem modo, temperatura e barramento. Antes dessas
+   duas correções o `.106` aparecia como *offline* em cerca de metade dos ciclos mesmo
+   com o Modbus respondendo.
+
+Se o 0925 também não responder, aí sim o leitor volta ao PI30 puro e o MPPT2 aparece como
 `não exposto` — nada quebra.
 
 > A nuvem do fabricante **não** serve de referência de instante: o dongle atende um
@@ -603,7 +614,8 @@ executores falsos, sem tocar no Gate, no SSH ou no XMRig.
 | SOC `0` com todos os campos zerados | Mapa errado respondendo com zeros | A validação de plausibilidade já rejeita isso na detecção |
 | `Geração solar 0 W` no `.106` de dia | PV1 sem painéis e o MPPT2 zerado | Confira o visor do MPPT2; se ele disser `não exposto`, o mapa 0925 não respondeu |
 | `Corrente de carga (parcial)` | Um inversor PI30 sem o mapa 0925 | Esperado nesse caso; com o 0925 o rótulo desaparece |
-| `MPPT2 não exposto` no `.106` | O mapa 0925 não respondeu neste ciclo | Rode com `-v`; o leitor cai para PI30 puro e volta ao normal no próximo ciclo |
+| `MPPT2 não exposto` no `.106` | Os dois canais falharam neste ciclo | Rode com `-v`; o ASCII é repetido e, se falhar, a leitura segue só com o 0925 |
+| `.106` marcado `offline` sem motivo | NAK ou resposta vazia no ASCII eram tratados como falha | Corrigido na 1.3.2: NAK/vazio são repetidos e o 0925 sozinho mantém o inversor online |
 | Tempo desde a leitura parecia dobrar | Era o carimbo do início do ciclo | Corrigido na 1.3.1: o `timestamp` marca o fim do ciclo |
 | Temperatura `—` | Modelo não expõe aquele sensor | Esperado; o tooltip da métrica explica |
 | EP2 volta às threads máximas sozinha | `"watch": true` no `config.json` do XMRig | Use `"watch": false` |
@@ -623,8 +635,9 @@ executores falsos, sem tocar no Gate, no SSH ou no XMRig.
   em paralelo.
 - **O `.106` mistura dois protocolos.** O `QPIGS` só carrega o MPPT1 e subnotifica as
   correntes da bateria; o mapa Modbus **0925** (slave 5, 4501+) traz o MPPT2 e as
-  correntes reais. O leitor `pi30_smg` usa os dois — se o 0925 não responder, cai para
-  PI30 puro e o MPPT2 volta a aparecer como `não exposto`.
+  correntes reais. O leitor `pi30_smg` usa os dois e tolera o canal ASCII intermitente:
+  NAK e resposta vazia são repetidos e, se persistirem, a leitura segue só com o 0925.
+  Quando isso acontece, modo, temperatura e barramento aparecem como `—`.
 - `inversor-59` publica modo, carga, temperaturas e PV, mas **não** tensão de rede — os
   registradores 202/203 respondem zero nesse modelo.
 - Em `pi30`, `current_charge` tem 1 decimal e `current_discharge` é inteiro.
