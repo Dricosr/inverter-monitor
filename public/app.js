@@ -160,7 +160,7 @@ function renderSummary(dashboard) {
   const online = dashboard.devices.filter((device) => device.online).length;
   const socValues = dashboard.devices.map((device) => device.soc).filter(Number.isFinite);
   const average = socValues.length ? Math.round(socValues.reduce((total, value) => total + value, 0) / socValues.length) : null;
-  const pv = dashboard.devices.reduce((total, device) => total + (Number.isFinite(device.pv.power) ? device.pv.power : 0), 0);
+  const solar = solarTotal(dashboard.devices);
   const output = dashboard.devices.reduce((total, device) => total + (Number.isFinite(device.output.activePower) ? Math.max(0, device.output.activePower) : 0), 0);
 
   elements.summary.innerHTML = [
@@ -169,9 +169,33 @@ function renderSummary(dashboard) {
       online < dashboard.devices.length
         ? `Média dos ${online} inversores que responderam agora`
         : 'Média do estado de carga das baterias'),
-    summaryCard('Geração solar', formatW(pv), 'Soma da potência fotovoltaica agora'),
+    summaryCard('Geração solar', formatPower(solar.value, solar.estimated),
+      solar.estimated
+        ? 'Estimativa: a soma inclui inversores que não informam a corrente PV'
+        : 'Soma da potência fotovoltaica agora'),
     summaryCard('Potência de saída', formatW(output), 'Soma da potência entregue às cargas'),
   ].join('');
+}
+
+/** Soma o PV medido e, quando o inversor não informa a corrente, a estimativa. */
+function solarTotal(devices) {
+  let measured = 0;
+  let estimated = false;
+  for (const device of devices) {
+    if (!device.online) continue;
+    if (Number.isFinite(device.pv.power)) {
+      measured += device.pv.power;
+    } else if (Number.isFinite(device.pv.powerEstimated)) {
+      measured += device.pv.powerEstimated;
+      estimated = true;
+    }
+  }
+  return { value: Number.isFinite(measured) ? measured : null, estimated };
+}
+
+function formatPower(value, estimated = false) {
+  const base = formatW(value);
+  return estimated && base !== '—' ? `≈ ${base}` : base;
 }
 
 function summaryCard(label, value, hint) {
@@ -208,7 +232,10 @@ function renderDevices(devices) {
           </div>
           <div class="metrics">
             ${metric('Potência de saída', formatW(device.output.activePower))}
-            ${metric('Geração solar', formatW(device.pv.power))}
+            ${metric('Geração solar', formatPower(
+              Number.isFinite(device.pv.power) ? device.pv.power : device.pv.powerEstimated,
+              !Number.isFinite(device.pv.power) && Number.isFinite(device.pv.powerEstimated),
+            ), solarHint(device))}
             ${metric('Carga no inversor', device.loadPercent == null ? '—' : `${device.loadPercent}%`)}
             ${metric('Tensão da bateria', device.battery.voltage == null ? '—' : `${device.battery.voltage.toFixed(1)} V`)}
             ${metric('Temperatura', device.temperature.inverter == null ? '—' : `${device.temperature.inverter} °C`)}
@@ -222,8 +249,18 @@ function renderDevices(devices) {
   });
 }
 
-function metric(label, value) {
-  return `<div class="metric"><span>${escapeHtml(label)}</span><strong title="${escapeHtml(value)}">${escapeHtml(value)}</strong></div>`;
+function metric(label, value, hint) {
+  const title = hint ? ` title="${escapeHtml(hint)}"` : ` title="${escapeHtml(value)}"`;
+  return `<div class="metric"><span>${escapeHtml(label)}</span><strong${title}>${escapeHtml(value)}</strong></div>`;
+}
+
+function solarHint(device) {
+  if (!device.online) return null;
+  if (Number.isFinite(device.pv.power)) return null;
+  if (!Number.isFinite(device.pv.powerEstimated)) {
+    return 'Este modelo não informa a corrente PV';
+  }
+  return 'Estimativa: consumo + carga da bateria − descarga (o inversor não informa a corrente PV)';
 }
 
 function offlineReason(device) {

@@ -13,8 +13,7 @@ export class StatusNormalizer {
       const output = this.#object(device.output);
       const grid = this.#object(device.grid);
 
-      const soc = this.#finite(battery.soc);
-      const pvPower = this.#finite(pv.power, null);
+      const soc = this.#finite(battery.soc, null);
       const activePower = this.#finite(output.active_power, null);
       const batteryPower = this.#finite(battery.power, null);
 
@@ -39,7 +38,8 @@ export class StatusNormalizer {
         pv: {
           voltage: this.#finite(pv.voltage, null),
           current: this.#finite(pv.current, null),
-          power: pvPower,
+          power: this.#finite(pv.power, null),
+          powerEstimated: this.#finite(pv.power_estimated, null),
         },
         grid: {
           voltage: this.#finite(grid.voltage, null),
@@ -54,7 +54,10 @@ export class StatusNormalizer {
           apparentPower: this.#finite(output.apparent_power, null),
         },
         loadPercent: this.#finite(device.load_percent, null),
-        temperature: this.#object(device.temperature),
+        temperature: {
+          inverter: this.#finite(this.#object(device.temperature).inverter, null),
+          dcdc: this.#finite(this.#object(device.temperature).dcdc, null),
+        },
       };
     });
   }
@@ -64,6 +67,9 @@ export class StatusNormalizer {
   }
 
   #finite(value, fallback = Number.NaN) {
+    // Number(null) e Number('') valem 0: sem esta guarda um campo ausente viraria
+    // "0 W" na tela, que e mentira (ausente != zero).
+    if (value === null || value === undefined || value === '') return fallback;
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : fallback;
   }

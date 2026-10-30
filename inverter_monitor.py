@@ -54,7 +54,7 @@ DONGLE_UDP_PORT = 58899
 LOCAL_TCP_PORT = 8899  # porta em que o dongle conecta de volta (fixa no firmware)
 CLOUD_RECOVERY_DELAY = 1.5
 
-__version__ = "1.1.1"
+__version__ = "1.1.2"
 
 log = logging.getLogger("inverter")
 
@@ -381,6 +381,26 @@ def parse_qpigs(raw: str, mode_letter: str = "?", serial: str | None = None) -> 
     battery_voltage = num(8)
     pv_voltage = num(13)
     pv_current = num(12)
+    charge_current = num(9)
+    discharge_current = num(15)
+    output_active = int(num(5))
+
+    # Neste firmware (MPS 10.2) o campo de corrente PV do QPIGS vem sempre 00.0,
+    # mesmo com o inversor gerando: a corrente de carga e a de descarga, sim, sao
+    # reais. Entao potência PV so existe quando a corrente foi informada; caso
+    # contrario resta a estimativa pelo balanco de energia (sem rede eletrica,
+    # tudo que a carga consome e a bateria recebe veio do PV).
+    if pv_current > 0:
+        pv_power = _pv_power(round(pv_voltage, 1), round(pv_current, 1))
+    elif pv_voltage <= 0:
+        pv_power = 0.0
+    else:
+        pv_power = None
+
+    pv_estimated = None
+    if pv_power is None:
+        balance = output_active + (charge_current - discharge_current) * battery_voltage
+        pv_estimated = round(max(0.0, balance), 1)
 
     return {
         "protocol": "pi30",
@@ -389,22 +409,23 @@ def parse_qpigs(raw: str, mode_letter: str = "?", serial: str | None = None) -> 
         "battery": {
             "soc": int(num(10)),
             "voltage": battery_voltage,
-            "current_charge": num(9),
-            "current_discharge": num(15),
-            "power": round(battery_voltage * (num(9) - num(15)), 1),
+            "current_charge": charge_current,
+            "current_discharge": discharge_current,
+            "power": round(battery_voltage * (charge_current - discharge_current), 1),
             "voltage_scc": num(14),
         },
         "pv": {
             "voltage": pv_voltage,
             "current": pv_current,
-            "power": _pv_power(round(pv_voltage, 1), round(pv_current, 1)),
+            "power": pv_power,
+            "power_estimated": pv_estimated,
         },
         "grid": {"voltage": num(0), "frequency": num(1)},
         "output": {
             "voltage": num(2),
             "frequency": num(3),
             "apparent_power": int(num(4)),
-            "active_power": int(num(5)),
+            "active_power": output_active,
         },
         "load_percent": int(num(6)),
         "bus_voltage": int(num(7)),

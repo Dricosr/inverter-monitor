@@ -168,6 +168,33 @@ class TestParsePi30(unittest.TestCase):
         self.assertAlmostEqual(d["pv"]["voltage"], 320.0)
         self.assertAlmostEqual(d["pv"]["current"], 2.5)
         self.assertAlmostEqual(d["pv"]["power"], 800.0)
+        self.assertIsNone(d["pv"]["power_estimated"])
+
+    def test_pv_sem_corrente_usa_estimativa_pelo_balanco(self):
+        # leitura real do MPS 10.2: corrente PV sempre 00.0, carga em 9 A
+        raw = ("(000.0 00.0 229.8 60.0 0482 0310 005 436 52.80 009 046 0061 "
+               "00.0 045.2 52.80 00000 00010110 00 00 00000 010\xd8\x7e\r")
+        d = im.parse_qpigs(raw, "B")
+        self.assertAlmostEqual(d["pv"]["voltage"], 45.2)
+        self.assertEqual(d["pv"]["current"], 0.0)
+        self.assertIsNone(d["pv"]["power"], "nao pode afirmar 0 W sem corrente")
+        # 310 W de saida + 9 A * 52,8 V de carga = 785,2 W
+        self.assertAlmostEqual(d["pv"]["power_estimated"], 785.2)
+        self.assertAlmostEqual(d["battery"]["power"], 475.2)
+
+    def test_estimativa_desconta_descarga(self):
+        raw = ("(000.0 00.0 229.8 60.0 0482 0300 005 436 52.00 000 046 0061 "
+               "00.0 040.0 52.00 00010 00010110 00 00 00000 010\xd8\x7e\r")
+        d = im.parse_qpigs(raw, "B")
+        # 300 W de saida - 10 A * 52 V vindos da bateria = -220 -> piso em 0
+        self.assertAlmostEqual(d["pv"]["power_estimated"], 0.0)
+
+    def test_sem_sol_nao_estima(self):
+        raw = ("(000.0 00.0 229.8 60.0 0482 0300 005 436 52.00 000 046 0061 "
+               "00.0 000.0 52.00 00000 00010110 00 00 00000 010\xd8\x7e\r")
+        d = im.parse_qpigs(raw, "B")
+        self.assertEqual(d["pv"]["power"], 0.0)
+        self.assertIsNone(d["pv"]["power_estimated"])
 
     def test_potencia_da_bateria_calculada(self):
         d = im.parse_qpigs(self.RAW, "B")

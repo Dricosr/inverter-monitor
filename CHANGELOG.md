@@ -7,6 +7,17 @@ e versionamento [SemVer](https://semver.org/lang/pt-BR/).
 
 ### Corrigido
 
+- **`.106` mostrava `0 W` de geração com o inversor gerando.** O `QPIGS` desse modelo
+  deixa o campo de corrente PV (12) travado em `00.0`, então `V × I` dava zero. Agora
+  `pv.power` fica `null` (não um falso zero) e o coletor publica `pv.power_estimated`
+  pelo balanço de energia (saída + carga − descarga); o painel exibe `≈ W` com a
+  fórmula no tooltip. Validado no `.59`, que mede as duas grandezas: PV 1442 W contra
+  1443 W do balanço.
+- **Campos ausentes viravam zero no painel.** `Number(null) === 0` fazia `pv.power`,
+  `grid.voltage` e `output.current` aparecerem como `0` quando o coletor informava
+  `null`. Agora ausente continua ausente e o card mostra `—`.
+- Mensagem do ai-node vazava o comando SSH cru (`Command failed: ssh -o ...`) na tela;
+  agora é `ai-node nao respondeu a tempo (timeout)`.
 - **Inversor offline derrubava o painel.** `automation-state.json` corrompido (todo em
   bytes NUL, resíduo de processo encerrado no meio da escrita) fazia `/api/dashboard`
   responder 500 e a UI ficar vazia. O `JsonStore` agora detecta o arquivo ilegível,

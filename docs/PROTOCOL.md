@@ -146,6 +146,47 @@ bytes de CRC (`73 73`) são impressos como `s` `s` — daí o visual `(NAKss\r`.
 Como o inversor estava em modo bateria (rede `000.0` V), a consistência foi validada por
 energia: 983 W de saída a 52,2 V ⇒ ≈ 21 A de descarga — coerente com o campo 15.
 
+### ⚠️ O campo 12 desta unidade (MPS 10.2) vem sempre `00.0`
+
+Com o inversor **gerando**, o `QPIGS` do `.106` reporta tensão PV (campo 13, 39–49 V) mas
+a corrente PV (campo 12) fica travada em `00.0`. A corrente de carga (campo 9) e a de
+descarga (campo 15), por outro lado, são reais — medidas entre 9 e 13 A. Ou seja:
+`V × I` **não serve** para calcular a potência solar deste modelo.
+
+Sete amostras consecutivas, com sol (30/10 09:26):
+
+```
+[5] saída  [9] carga  [12] iPv  [13] Vpv
+   0310        009      00.0      045.2
+   0329        009      00.0      038.9
+   0289        009      00.0      039.5
+   0319        010      00.0      044.4
+   0362        011      00.0      042.9
+   0306        011      00.0      041.8
+   0294        013      00.0      040.8
+```
+
+`QPIGS2` (segundo MPPT) responde **NAK**, e os campos 17–20 (`00 00 00000 010`) não
+variam — não há potência PV em outro lugar da resposta.
+
+**Solução adotada:** quando a corrente PV não é informada, o `pv.power` fica `null` (nunca
+um falso `0 W`) e o coletor publica `pv.power_estimated` pelo **balanço de energia**:
+
+```
+PV ≈ potência_ativa_de_saída + (corrente_de_carga − corrente_de_descarga) × tensão_da_bateria
+```
+
+Sem rede elétrica, tudo o que a carga consome e a bateria recebe veio do PV, então a
+igualdade fecha. Validação cruzada no `.59`, que **mede** as duas coisas:
+
+| Inversor | PV medido | saída + carga − descarga |
+| --- | --- | --- |
+| `.59` | 1442 W | 115 + 25,2 × 52,7 = **1443 W** |
+| `.106` | (não informado) | 312 + 10 × 52,9 = **841 W** |
+
+O painel mostra o valor estimado com `≈` e explica a fórmula no tooltip, para nunca
+confundir estimativa com medição.
+
 ## 5. Modbus RTU — mapa A (EG4 3000EHV)
 
 Usado por `.33`. Leitura em bloco único de 45 registradores a partir de 200
