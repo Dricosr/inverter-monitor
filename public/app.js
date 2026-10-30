@@ -169,33 +169,33 @@ function renderSummary(dashboard) {
       online < dashboard.devices.length
         ? `Média dos ${online} inversores que responderam agora`
         : 'Média do estado de carga das baterias'),
-    summaryCard('Geração solar', formatPower(solar.value, solar.estimated),
-      solar.estimated
-        ? 'Estimativa: a soma inclui inversores que não informam a corrente PV'
+    summaryCard('Geração solar', formatW(solar.value),
+      solar.excluded
+        ? `Soma apenas dos inversores que medem a corrente PV — ${solar.excluded} não informa(m) esse dado`
         : 'Soma da potência fotovoltaica agora'),
     summaryCard('Potência de saída', formatW(output), 'Soma da potência entregue às cargas'),
   ].join('');
 }
 
-/** Soma o PV medido e, quando o inversor não informa a corrente, a estimativa. */
+/** Soma somente o PV medido: estimativa nao entra como geracao. */
 function solarTotal(devices) {
   let measured = 0;
-  let estimated = false;
+  let any = false;
+  let excluded = 0;
   for (const device of devices) {
     if (!device.online) continue;
     if (Number.isFinite(device.pv.power)) {
       measured += device.pv.power;
-    } else if (Number.isFinite(device.pv.powerEstimated)) {
-      measured += device.pv.powerEstimated;
-      estimated = true;
+      any = true;
+    } else {
+      excluded += 1;
     }
   }
-  return { value: Number.isFinite(measured) ? measured : null, estimated };
+  return { value: any ? measured : null, excluded };
 }
 
-function formatPower(value, estimated = false) {
-  const base = formatW(value);
-  return estimated && base !== '—' ? `≈ ${base}` : base;
+function formatPower(value) {
+  return formatW(value);
 }
 
 function summaryCard(label, value, hint) {
@@ -232,10 +232,7 @@ function renderDevices(devices) {
           </div>
           <div class="metrics">
             ${metric('Potência de saída', formatW(device.output.activePower))}
-            ${metric('Geração solar', formatPower(
-              Number.isFinite(device.pv.power) ? device.pv.power : device.pv.powerEstimated,
-              !Number.isFinite(device.pv.power) && Number.isFinite(device.pv.powerEstimated),
-            ), solarHint(device))}
+            ${metric('Geração solar', formatPower(device.pv.power), solarHint(device))}
             ${metric('Carga no inversor', device.loadPercent == null ? '—' : `${device.loadPercent}%`)}
             ${metric('Temperatura', device.temperature.inverter == null ? '—' : `${device.temperature.inverter} °C`)}
             ${metric('Tensão da bateria', device.battery.voltage == null ? '—' : `${device.battery.voltage.toFixed(1)} V`)}
@@ -269,18 +266,17 @@ function balanceLine(device) {
   const out = Number.isFinite(device.output.activePower) ? Math.round(device.output.activePower) : 0;
   const charging = Number.isFinite(device.battery.chargePower) ? Math.round(device.battery.chargePower) : 0;
   const discharging = Number.isFinite(device.battery.dischargePower) ? Math.round(device.battery.dischargePower) : 0;
-  const parts = [`saída ${out} W`, `carga ${charging} W`];
-  if (discharging) parts.push(`descarga ${discharging} W`);
-  return `<p class="device-diag">Sem corrente PV neste modelo · balanço: ${escapeHtml(parts.join(' + ').replace('+ descarga', '− descarga'))}</p>`;
+  const total = Math.round(device.pv.powerEstimated);
+  const formula = discharging
+    ? `${out} + ${charging} − ${discharging} = ${total} W`
+    : `${out} + ${charging} = ${total} W`;
+  return `<p class="device-diag" title="O inversor não informa a corrente PV; este é o balanço de potência no lado DC">Balanço útil: ${escapeHtml(formula)}</p>`;
 }
 
 function solarHint(device) {
   if (!device.online) return null;
   if (Number.isFinite(device.pv.power)) return 'Potência medida (tensão × corrente PV)';
-  if (!Number.isFinite(device.pv.powerEstimated)) {
-    return 'Este modelo não informa a corrente PV';
-  }
-  return 'Potência útil medida (saída + carga da bateria). O inversor não informa a corrente PV, então a geração real pode ser maior';
+  return 'O inversor não informa a corrente PV, então a geração não pode ser medida. Veja o balanço útil abaixo';
 }
 
 function offlineReason(device) {
