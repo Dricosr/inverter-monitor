@@ -5,6 +5,8 @@ data/latest.json
 data/dashboard.json
 data/intents.json
 data/automation-state.json
+data/*.corrupt-*
+data/*.tmp
 node_modules/
 logs/
 *.log
