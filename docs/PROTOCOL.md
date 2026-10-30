@@ -170,6 +170,23 @@ QPIGS3  -> NAK      QPGS1 -> NAK     QLT  -> NAK     QPIZ -> NAK
 Nenhum campo sobrando da resposta carrega o PV2: 17–20 (`00 00 00000 010`) são constantes
 e o dongle **não** envia telemetria espontânea (0 bytes em 25 s de escuta).
 
+#### A corrente da bateria também é parcial
+
+Confronto pareado (30/10, 10:20, mesmo minuto):
+
+| Fonte | PV2 | Saída | Corrente de carga | Balanço implícito |
+| --- | --- | --- | --- | --- |
+| `QPIGS` local (campo 9) | não exposto | 319 W | **5,0 A** (≈ 265 W) | 584 W |
+| App do fabricante | 1083 W | 331 W | **12 A** (≈ 637 W) | 968 W |
+
+Como o PV2 entrega ~1083 W e a saída consome 331 W, sobram ~750 W para a bateria:
+quem está certo é a nuvem. O campo 9 do `QPIGS` **subnotifica** a carga quando o MPPT2
+está produzindo (noutra amostra: `000` A local contra 2 A na nuvem). Por isso o coletor
+publica `battery.current_partial = true` e o painel mostra "Carga da bateria (parcial)".
+
+Consequência: o balanço DC sai **por baixo** nesse inversor — ele é um piso
+(`balanço DC ≥ N W`), não um valor fechado.
+
 **O que o projeto faz com isso:**
 
 - publica `pv.mppt = 1`, `pv.mppt_count = 2` e `pv.mppt_unreadable = [2]`;
@@ -222,41 +239,45 @@ Captura real (regs 200–239):
 
 ## 6. Modbus RTU — mapa B (Anenji)
 
-Usado por `.59`. A bateria fica num bloco diferente:
+Usado por `.59`. Leitura em cinco blocos: `200+37` (cabeçalho, modo, rede e
+temperatura do módulo INV), `277+29` (bateria, PV total e temperaturas), `252+4`
+(saída), `342+12` (saída + PV1) e `389+3` (PV2). Blocos grandes importam: cada
+requisição é uma ida e volta pelo dongle.
 
-| Reg | Campo | Escala |
-| --- | --- | --- |
-| 200 | Identificador do mapa (`0xB000` nos dois Anenji) | — |
-| **201** | **Modo/estado** | enum igual ao mapa A (`3` = Off-Grid) |
-| 202 | Tensão da rede | ÷10 V (`0` = sem rede) |
-| 203 | Frequência da rede | ÷100 Hz |
-| 252 | Corrente de saída | ÷10 A |
-| 253 | Frequência de saída | ÷100 Hz |
-| 254 | Potência ativa | W |
-| 255 | Potência aparente | VA |
-| **277** | **Tensão da bateria** | ÷10 V |
-| 278 | Corrente da bateria | ÷10 A (signed; negativo = descarregando) |
-| 279 | Potência da bateria | W (signed) |
-| **280** | **SOC** | % |
-| 281 | Temperatura do módulo DC | °C |
-| 305 | Temperatura do módulo PV | °C |
-| 342 | Tensão de saída | ÷10 V |
-| **343** | **Temperatura do inversor** | °C (signed) |
-| **350** | **Carga do inversor** | % da potência nominal |
-| 351 | Tensão PV1 | ÷10 V |
-| 352 | Corrente PV1 | ÷10 A ⚠️ inferido |
-| 389 | Tensão PV2 | ÷10 V |
-| 390 | Corrente PV2 | ÷10 A ⚠️ inferido |
-| **691** | **Potência nominal** | W (`11000` no `.59`) |
+| Reg | Campo | Escala | Evidência |
+| --- | --- | --- | --- |
+| 200 | Identificador do mapa (`0xB000` nos dois Anenji) | — | — |
+| **201** | **Modo/estado** | enum igual ao mapa A (`3` = Off-Grid) | — |
+| 202 | Tensão da rede | ÷10 V (`0` = sem rede) | — |
+| 203 | Frequência da rede | ÷100 Hz | — |
+| **231** | **Temperatura do módulo INV** | °C | nuvem 43 °C ↔ local 43–44 °C |
+| 252 | Corrente de saída | ÷10 A | — |
+| 253 | Frequência de saída | ÷100 Hz | — |
+| 254 | Potência ativa | W | — |
+| 255 | Potência aparente | VA | — |
+| **277** | **Tensão da bateria** | ÷10 V | — |
+| 278 | Corrente da bateria | ÷10 A (signed; negativo = descarregando) | — |
+| 279 | Potência da bateria | W (signed) | 303 repete o valor |
+| **280** | **SOC** | % | — |
+| 281 | Temperatura do módulo DC | °C | nuvem 34 °C ↔ local 34 °C |
+| **302** | **Potência PV total** (os dois MPPTs) | W | 442 ↔ 353+391 = 440 |
+| 305 | Temperatura do módulo PV | °C | nuvem 39–40 °C ↔ local 39–41 °C |
+| 342 | Tensão de saída | ÷10 V | 346 repete o valor |
+| **350** | **Carga do inversor** | % da potência nominal | — |
+| 351 | Tensão PV1 | ÷10 V | — |
+| 352 | Corrente PV1 | ÷10 A | 353 ≈ 351 × 352 |
+| **353** | **Potência PV1** | W | 210 ↔ 169,5 V × 1,2 A |
+| 389 | Tensão PV2 | ÷10 V | — |
+| 390 | Corrente PV2 | ÷10 A | 391 ≈ 389 × 390 |
+| **391** | **Potência PV2** | W | 278 ↔ 186,4 V × 1,4 A |
+| **691** | **Potência nominal** | W (`11000` no `.59`) | — |
 
-A potência PV é calculada por `V × I` (soma dos dois MPPTs), com descarte de valores
-implausíveis (tensão > 600 V ou corrente > 60 A).
+A potência PV vem do **registrador medido** (353 e 391) e cai para `V × I` só quando
+o firmware não informa a potência. O total publicado é a soma das duas entradas.
 
-> ⚠️ **Corrente PV ainda não confirmada em produção.** À noite os registradores 352 e
-> 390 valem zero, então a posição foi inferida por adjacência (351/352 e 389/390 são
-> pares tensão/corrente). A primeira leitura com geração solar deve ser conferida
-> contra o display do inversor; se a escala estiver errada, ajuste `_scaled(..., 10)`
-> em `read_modbus_b`.
+> ⚠️ O registrador **343** (~47–49 °C) varia com a carga, mas **não** é a temperatura
+> que o fabricante publica (a nuvem mostrava 43 °C quando ele marcava 48 °C). Ele é
+> lido, porém não é publicado: quem manda no campo `temperature.inverter` é o 231.
 
 ### Como esses campos foram descobertos
 
@@ -265,13 +286,30 @@ com os valores já conhecidos: bateria 52,1 V/54 %/-255 W, saída 240,0 V/1,4 A/
 PV 25,9 V. Os blocos encontrados casaram com a leitura instantânea:
 
 ```
-pares (tensão, corrente) 351/352 e 389/390
+pares (tensão, corrente, potência) 351/352/353 e 389/390/391
 343 = 49–50 °C (sobe com a carga)      350 = 3 com 335 VA de 11 kW
 691 = 11000 (nominal, confirma o modelo)
 ```
 
 O bloco 342–351 **não** tem o mesmo significado no mapa A: no `.33` esses registradores
 guardam ajustes (342=40, 343=20, 344=5500), por isso os offsets são tratados por mapa.
+
+### Conferência contra a nuvem do fabricante (30/10, manhã)
+
+Com o app do fabricante aberto no mesmo minuto, os dois lados fecharam:
+
+| Grandeza | Local (Modbus B) | Nuvem |
+| --- | --- | --- |
+| SOC | 61 % | 61 % |
+| Tensão da bateria | 52,6 V | 52,6 V |
+| Potência PV total | 442 W (reg 302) | 444 W |
+| PV1 / PV2 | 206,3 V · 174 W / 210,0 V · 266 W | 182,5 V · 188 W / 192,0 V · 269 W |
+| Temperatura módulo INV | 44 °C (reg 231) | 43 °C |
+| Temperatura módulo DC | 34 °C (reg 281) | 34 °C |
+| Temperatura PV | 40 °C (reg 305) | 39–40 °C |
+
+As diferenças de PV são de instante (a nuvem grava a cada 5 min); a escala e o
+significado de cada registrador ficaram confirmados.
 
 ## 7. Pegadinha: dois mapas, mesmo dongle
 

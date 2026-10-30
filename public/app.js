@@ -254,9 +254,10 @@ function renderDevices(devices) {
             ${metric('Geração solar', formatPower(device.pv.power), solarHint(device))}
             ${metric('Carga no inversor', device.loadPercent == null ? '—' : `${device.loadPercent}%`)}
             ${metric('Temperatura', device.temperature.inverter == null ? '—' : `${device.temperature.inverter} °C`)}
+            ${metric('Temp. PV', device.temperature.pv == null ? '—' : `${device.temperature.pv} °C`, 'Temperatura do módulo fotovoltaico')}
             ${metric('Tensão da bateria', device.battery.voltage == null ? '—' : `${device.battery.voltage.toFixed(1)} V`)}
-            ${metric('Carga da bateria', formatAmps(device.battery.chargeCurrent), 'Corrente entrando na bateria')}
-            ${metric('Descarga da bateria', formatAmps(device.battery.dischargeCurrent), 'Corrente saindo da bateria')}
+            ${metric(partialLabel('Carga da bateria', device), formatAmps(device.battery.chargeCurrent), currentHint(device, 'Carga da bateria'))}
+            ${metric(partialLabel('Descarga da bateria', device), formatAmps(device.battery.dischargeCurrent), currentHint(device, 'Descarga da bateria'))}
             ${metric('Tensão PV', device.pv.voltage == null ? '—' : `${device.pv.voltage.toFixed(1)} V`)}
           </div>
           ${device.online ? balanceLine(device) : ''}
@@ -278,14 +279,35 @@ function formatAmps(value) {
   return Number.isFinite(value) ? `${value.toFixed(1)} A` : '—';
 }
 
+/** O QPIGS de um inversor de dois MPPTs so mede as correntes do SCC1. */
+function partialLabel(label, device) {
+  return device.battery.currentPartial ? `${label} (parcial)` : label;
+}
+
+function currentHint(device, label) {
+  if (device.battery.currentPartial) {
+    return `${label}: o inversor só reporta o SCC1 — a corrente do MPPT2 não entra nesta medição`;
+  }
+  return label === 'Carga da bateria' ? 'Corrente entrando na bateria' : 'Corrente saindo da bateria';
+}
+
 /** Mostra a conta quando a potência solar nao foi medida, para dar como conferir. */
 function balanceLine(device) {
-  if (!Number.isFinite(device.pv.dcBalance)) return '';
-  if (device.pv.mpptCount > 1) {
-    const missing = device.pv.mpptUnreadable.length
-      ? `MPPT${device.pv.mpptUnreadable.join(', MPPT')}`
-      : 'o outro MPPT';
-    return `<p class="device-diag" title="O inversor só expõe o MPPT1; QPIGS2 responde NAK">${escapeHtml(missing)} não é exposto por este inversor · balanço DC: ${escapeHtml(formatW(device.pv.dcBalance))}</p>`;
+  if (Number.isFinite(device.pv.dcBalance)) {
+    if (device.pv.mpptCount > 1) {
+      const missing = device.pv.mpptUnreadable.length
+        ? `MPPT${device.pv.mpptUnreadable.join(', MPPT')}`
+        : 'o outro MPPT';
+      const hint = device.battery.currentPartial
+        ? 'A corrente da bateria é parcial, então o balanço DC é um piso: a geração real é maior'
+        : 'QPIGS2 responde NAK: o inversor não expõe a segunda entrada PV';
+      return `<p class="device-diag" title="${escapeHtml(hint)}">${escapeHtml(missing)} não é exposto por este inversor · balanço DC ≥ ${escapeHtml(formatW(device.pv.dcBalance))}</p>`;
+    }
+    return '';
+  }
+  if (device.pv.mpptPower.length > 1 && device.pv.mpptPower.some(Number.isFinite)) {
+    const parts = device.pv.mpptPower.map((power, index) => `MPPT${index + 1} ${formatW(power)}`);
+    return `<p class="device-diag" title="Potência medida em cada entrada PV">${escapeHtml(parts.join(' · '))}</p>`;
   }
   return '';
 }

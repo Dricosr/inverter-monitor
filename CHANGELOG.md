@@ -3,6 +3,39 @@
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 e versionamento [SemVer](https://semver.org/lang/pt-BR/).
 
+## [1.1.3] — 2026-10-31
+
+### Corrigido
+
+- **A temperatura do `.59` estava no registrador errado.** O campo `temperature.inverter`
+  lia o registrador 343 (47–49 °C), mas o valor que o fabricante publica é o do
+  registrador **231** — com o app do fabricante aberto no mesmo minuto, 43 °C na nuvem
+  contra 44 °C no 231 e 48 °C no 343. Agora o coletor lê o 231.
+- **A corrente da bateria do `.106` é parcial e agora está rotulada como tal.** Com
+  1083 W no MPPT2 e 331 W de saída, o `QPIGS` reportou 5 A de carga enquanto a nuvem
+  mostrava 12 A (outra amostra: `000` A contra 2 A). O parser publica
+  `battery.current_partial = true`; o card mostra "Carga da bateria (parcial)" e o
+  balanço DC passou a ser apresentado como piso (`≥`), porque é calculado com essa
+  corrente subnotificada.
+
+### Adicionado
+
+- **Temperatura do módulo PV** (`temperature.pv`, registrador 305) e do módulo DC
+  (`temperature.dcdc`, registrador 281), ambas conferidas contra a nuvem. O card ganhou
+  a métrica "Temp. PV"; antes essa informação só existia no display do inversor.
+- **Potência por MPPT** (`pv.mppt_power`): o coletor passou a ler os registradores de
+  potência medidos (353 e 391 em vez de `V × I`) e o card mostra
+  "MPPT1 534 W · MPPT2 642 W". As correntes 352/390 deixaram de ser "inferidas": as
+  potências confirmam a escala, e o total bate com o registrador 302 (PV total).
+- `docs/PROTOCOL.md` ganhou a tabela de conferência local × nuvem do mapa B.
+
+### Alterado
+
+- **Uma requisição a menos por ciclo no `.59`**: o mapa B passou de seis blocos pequenos
+  para cinco maiores (`200+37`, `277+29`, `252+4`, `342+12`, `389+3`).
+- `battery.temperature` saiu do payload do mapa B: o registrador 281 é a temperatura do
+  módulo DC (nome que o fabricante usa) e publicá-lo com dois nomes era ambíguo.
+
 ## [1.1.2] — 2026-10-31
 
 ### Corrigido

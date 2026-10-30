@@ -106,24 +106,47 @@ class TestParseModbusB(unittest.TestCase):
         self.assertIsNone(d["grid"]["frequency"])
 
     def test_modo_temperatura_e_carga(self):
+        temps = {"inverter": 44, "dcdc": 34, "pv": 40}
         d = im.parse_modbus_b(self.BAT, self.OUT, self.GRID, self.AC, self.PV,
-                              status=[0xB000, 3], load_percent=[3])
+                              status=[0xB000, 3], load_percent=[3], temperatures=temps)
         self.assertEqual(d["mode"], "Off-Grid")
         self.assertEqual(d["status_code"], 3)
-        self.assertEqual(d["temperature"]["inverter"], 49)
+        self.assertEqual(d["temperature"], {"inverter": 44, "dcdc": 34, "pv": 40})
         self.assertEqual(d["load_percent"], 3)
+
+    def test_temperatura_negativa_vira_signed(self):
+        d = im.parse_modbus_b(self.BAT, self.OUT, self.GRID, self.AC, self.PV,
+                              temperatures={"inverter": 0xFFF6})
+        self.assertEqual(d["temperature"]["inverter"], -10)
+        self.assertIsNone(d["temperature"]["dcdc"])
+        self.assertIsNone(d["temperature"]["pv"])
 
     def test_sem_registradores_opcionais_nao_quebra(self):
         d = im.parse_modbus_b(self.BAT, self.OUT, self.GRID, self.AC, self.PV)
         self.assertIsNone(d["mode"])
         self.assertIsNone(d["status_code"])
         self.assertIsNone(d["load_percent"])
+        self.assertIsNone(d["temperature"]["inverter"])
+
+    def test_reg_recorta_o_bloco(self):
+        self.assertEqual(im._reg([10, 20, 30], 100, 101), 20)
+        self.assertIsNone(im._reg([10, 20, 30], 100, 99))
+        self.assertIsNone(im._reg([10, 20, 30], 100, 103))
+        self.assertIsNone(im._reg([], 100, 100))
 
     def test_potencia_pv_somando_as_duas_entradas(self):
         pv = {"pv1": 25.6, "pv2": 24.6, "pv1_current": 2.0, "pv2_current": 1.0}
         d = im.parse_modbus_b(self.BAT, self.OUT, self.GRID, self.AC, pv)
         self.assertAlmostEqual(d["pv"]["current"], 3.0)
         self.assertAlmostEqual(d["pv"]["power"], 75.8)  # 25.6*2 + 24.6*1
+        self.assertEqual(d["pv"]["mppt_power"], [51.2, 24.6])
+
+    def test_potencia_medida_tem_prioridade(self):
+        pv = {"pv1": 199.0, "pv2": 201.6, "pv1_current": 0.4, "pv2_current": 0.6,
+              "pv1_power": 94, "pv2_power": 137}
+        d = im.parse_modbus_b(self.BAT, self.OUT, self.GRID, self.AC, pv)
+        self.assertEqual(d["pv"]["power"], 231.0)
+        self.assertEqual(d["pv"]["mppt_power"], [94.0, 137.0])
 
     def test_potencia_pv_sem_corrente_fica_none(self):
         d = im.parse_modbus_b(self.BAT, self.OUT, self.GRID, self.AC, self.PV)
@@ -185,6 +208,14 @@ class TestParsePi30(unittest.TestCase):
         # 310 W de saida + 9 A * 52,8 V de carga = 785,2 W de balanco DC
         self.assertAlmostEqual(d["pv"]["dc_balance"], 785.2)
         self.assertAlmostEqual(d["battery"]["power"], 475.2)
+
+    def test_correntes_da_bateria_sao_parciais(self):
+        # A nuvem mostrava 2 A de carga com 611 W no MPPT2 enquanto o QPIGS dizia 0 A
+        raw = ("(000.0 00.0 229.8 60.0 0576 0402 006 436 52.80 000 046 0061 "
+               "00.0 040.0 52.80 00000 00010110 00 00 00000 010\xd8\x7e\r")
+        d = im.parse_qpigs(raw, "B")
+        self.assertTrue(d["battery"]["current_partial"])
+        self.assertEqual(d["battery"]["current_charge"], 0.0)
 
     def test_mppt1_com_geracao_mede_normalmente(self):
         raw = ("(000.0 00.0 229.8 60.0 0482 0310 005 436 52.80 000 046 0061 "

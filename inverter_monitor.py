@@ -54,7 +54,7 @@ DONGLE_UDP_PORT = 58899
 LOCAL_TCP_PORT = 8899  # porta em que o dongle conecta de volta (fixa no firmware)
 CLOUD_RECOVERY_DELAY = 1.5
 
-__version__ = "1.1.2"
+__version__ = "1.1.3"
 
 log = logging.getLogger("inverter")
 
@@ -246,6 +246,18 @@ def _pv_power(voltage: float | None, current: float | None) -> float | None:
     return round(voltage * current, 1)
 
 
+def _pv_measured(value: int | None) -> float | None:
+    """Potencia PV medida pelo inversor (registradores 353/391), em W."""
+    if value is None:
+        return None
+    value = s16(value)
+    return float(value) if 0 <= value <= 20000 else None
+
+
+def _signed_or_none(value: int | None) -> int | None:
+    return None if value is None else s16(value)
+
+
 def parse_modbus_a(r: list[int]) -> dict:
     """Decodifica o bloco de 45 registradores (200-244) do mapa EG4/Axpert."""
     g = lambda reg: r[reg - 200]
@@ -285,52 +297,75 @@ def read_modbus_a(link: Dongle) -> dict:
     return parse_modbus_a(_modbus_block(link, 200, 45))
 
 
+def _reg(block: list[int], start: int, reg: int) -> int | None:
+    """Valor de um registrador absoluto dentro de um bloco iniciado em `start`."""
+    offset = reg - start
+    return block[offset] if 0 <= offset < len(block) else None
+
+
 def read_modbus_b(link: Dongle) -> dict:
     """Mapa Anenji/Megarevo.
 
-    Blocos: bateria 277-281, saida 252-255, AC 342-343, cabecalho 200-203
-    (modo e rede) e 350-352 / 389-390 (carga e PV). Seis requisicoes no total.
+    Cinco requisicoes: cabecalho 200-236 (modo, rede e temperatura do modulo INV),
+    bateria/PV total/temperaturas 277-305, saida 252-255, saida+PV1 342-353 e
+    PV2 389-391. Blocos grandes reduzem a ida e volta pelo dongle.
     """
-    bat = _required_block(link, 277, 5)
+    head = _safe_block(link, 200, 37)
+    bat = _required_block(link, 277, 29)
     out = _required_block(link, 252, 4)
-    ac = _required_block(link, 342, 2)
-    head = _safe_block(link, 200, 4)
-    pv1 = _safe_block(link, 350, 3)
-    pv2 = _safe_block(link, 389, 2)
+    acpv = _safe_block(link, 342, 12)
+    pv2 = _safe_block(link, 389, 3)
+
     pv = {
-        "pv1": _scaled(pv1[1], 10) if len(pv1) > 1 else None,
-        "pv2": _scaled(pv2[0], 10) if pv2 else None,
-        "pv1_current": _scaled(pv1[2], 10) if len(pv1) > 2 else None,
-        "pv2_current": _scaled(pv2[1], 10) if len(pv2) > 1 else None,
+        "pv1": _scaled(_reg(acpv, 342, 351), 10),
+        "pv2": _scaled(_reg(pv2, 389, 389), 10),
+        "pv1_current": _scaled(_reg(acpv, 342, 352), 10),
+        "pv2_current": _scaled(_reg(pv2, 389, 390), 10),
+        "pv1_power": _reg(acpv, 342, 353),
+        "pv2_power": _reg(pv2, 389, 391),
     }
+    load = _reg(acpv, 342, 350)
     return parse_modbus_b(
-        bat, out,
+        bat[0:5], out,
         grid=head[2:4],
-        ac=ac,
+        ac=acpv[0:2],
         pv=pv,
         status=head[0:2],
-        load_percent=pv1[0:1],
+        load_percent=[] if load is None else [load],
+        temperatures={
+            "inverter": _reg(head, 200, 231),
+            "dcdc": _reg(bat, 277, 281),
+            "pv": _reg(bat, 277, 305),
+        },
     )
 
 
 def parse_modbus_b(bat: list[int], out: list[int], grid: list[int],
                    ac: list[int], pv: dict,
                    status: list[int] | None = None,
-                   load_percent: list[int] | None = None) -> dict:
+                   load_percent: list[int] | None = None,
+                   temperatures: dict | None = None) -> dict:
     """Decodifica os blocos do mapa Anenji/Megarevo."""
     status = status or []
     load_percent = load_percent or []
+    temperatures = temperatures or {}
 
     grid_v = _scaled(s16(grid[0]), 10) if grid and grid[0] else None
     grid_f = round(s16(grid[1]) / 100, 2) if len(grid) > 1 and grid[1] else None
     mode_code = status[1] if len(status) > 1 else None
-    temperature = s16(ac[1]) if len(ac) > 1 else None
 
     pv1_v = pv.get("pv1")
     pv2_v = pv.get("pv2")
     pv1_i = pv.get("pv1_current")
     pv2_i = pv.get("pv2_current")
-    powers = [p for p in (_pv_power(pv1_v, pv1_i), _pv_power(pv2_v, pv2_i)) if p is not None]
+    # Potencia medida pelo proprio inversor (regs 353/391); V x I so como reserva.
+    pv1_p = _pv_measured(pv.get("pv1_power"))
+    if pv1_p is None:
+        pv1_p = _pv_power(pv1_v, pv1_i)
+    pv2_p = _pv_measured(pv.get("pv2_power"))
+    if pv2_p is None:
+        pv2_p = _pv_power(pv2_v, pv2_i)
+    powers = [p for p in (pv1_p, pv2_p) if p is not None]
     currents = [i for i in (pv1_i, pv2_i) if i is not None]
 
     return {
@@ -342,13 +377,13 @@ def parse_modbus_b(bat: list[int], out: list[int], grid: list[int],
             "voltage": round(bat[0] / 10, 1),
             "current": round(s16(bat[1]) / 10, 1),
             "power": s16(bat[2]),
-            "temperature": s16(bat[4]),
         },
         "pv": {
             "voltage": pv1_v,
             "voltage2": pv2_v,
             "current": round(sum(currents), 1) if currents else None,
             "power": round(sum(powers), 1) if powers else None,
+            "mppt_power": [pv1_p, pv2_p] if powers else None,
         },
         "grid": {"voltage": grid_v, "frequency": grid_f},
         "output": {
@@ -359,7 +394,11 @@ def parse_modbus_b(bat: list[int], out: list[int], grid: list[int],
             "apparent_power": s16(out[3]),
         },
         "load_percent": load_percent[0] if load_percent else None,
-        "temperature": {"inverter": temperature},
+        "temperature": {
+            "inverter": _signed_or_none(temperatures.get("inverter")),
+            "dcdc": _signed_or_none(temperatures.get("dcdc")),
+            "pv": _signed_or_none(temperatures.get("pv")),
+        },
     }
 
 
@@ -408,6 +447,10 @@ def parse_qpigs(raw: str, mode_letter: str = "?", serial: str | None = None) -> 
             "current_discharge": discharge_current,
             "power": round(battery_voltage * (charge_current - discharge_current), 1),
             "voltage_scc": num(14),
+            # As correntes do QPIGS ficam abaixo do real quando o MPPT2 gera: com 1083 W
+            # no PV2 e 331 W de saida o inversor reportou 5 A de carga, enquanto a nuvem
+            # do fabricante mostrava 12 A no mesmo minuto. Sao parciais.
+            "current_partial": True,
         },
         "pv": {
             "mppt": 1,

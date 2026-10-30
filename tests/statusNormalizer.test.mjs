@@ -55,6 +55,31 @@ test('zero real continua zero', () => {
   assert.equal(result[0].pv.power, 0);
 });
 
+test('temperaturas, potencia por MPPT e corrente parcial', () => {
+  const result = new StatusNormalizer().normalize({
+    timestamp: '2026-10-30T10:20:00-03:00',
+    devices: {
+      a: {
+        online: true,
+        battery: { soc: 61, voltage: 52.6, current_charge: 0, current_discharge: 0, current_partial: true },
+        pv: { power: 231, mppt_power: [94, 137], voltage: 199, voltage2: 201.6 },
+        grid: {},
+        output: {},
+        temperature: { inverter: 43, dcdc: 34, pv: 39 },
+      },
+      b: { online: true, battery: { soc: 45 }, pv: {}, output: {}, grid: {} },
+    },
+  }, [{ name: 'a' }, { name: 'b' }]);
+
+  assert.deepEqual(result[0].pv.mpptPower, [94, 137]);
+  assert.deepEqual(result[0].temperature, { inverter: 43, dcdc: 34, pv: 39 });
+  assert.equal(result[0].battery.currentPartial, true);
+  assert.equal(result[0].battery.chargeCurrent, 0, 'zero informado continua zero');
+  assert.deepEqual(result[1].pv.mpptPower, [], 'sem dado nao inventa entrada');
+  assert.equal(result[1].battery.currentPartial, false);
+  assert.equal(result[1].temperature.pv, null);
+});
+
 test('offline preserva motivo e hora da ultima leitura', () => {
   const result = new StatusNormalizer().normalize({
     timestamp: '2026-10-30T09:00:00-03:00',

@@ -116,11 +116,11 @@ Portanto, ele nunca se torna um segundo coletor concorrente. Entre os recursos:
 - cartão de automação na barra lateral mostrando quantas regras estão atuando;
 - SOC, tensão da bateria, PV, carga, saída e temperatura por inversor, com barra de
   bateria colorida por faixa e aviso de bateria baixa abaixo de 30%;
-- potência solar calculada por `V × I` quando o inversor informa tensão e corrente
-  (mapa B, e MPPT1 no PI30);
-- por inversor: potência de saída, geração, carga, temperatura, tensão e corrente de
-  carga/descarga da bateria e tensão PV — mais uma linha com o balanço DC quando a
-  geração não é medida, para conferir com o display;
+- potência solar medida por MPPT no mapa B (registradores 353/391) e só o MPPT1 no PI30;
+- por inversor: potência de saída, geração, carga, temperaturas (inversor e painel),
+  tensão e corrente de carga/descarga da bateria e tensão PV — mais uma linha com a
+  divisão por MPPT ou com o balanço DC quando a geração não é medida, para conferir com
+  o display;
 - nomes amigáveis persistidos em `data/dashboard.json`;
 - Fila do Gate (pausa e jobs na fila) e mineração EP2/ai-node com hash rate de agora,
   1 min e 15 min;
@@ -280,13 +280,15 @@ Cada dispositivo é um objeto. Campos com `*` dependem do protocolo.
 | `battery.voltage` | float | Tensão da bateria (V) |
 | `battery.current`* | float | Corrente (A); negativo = descarregando (`modbus_a`/`modbus_b`) |
 | `battery.power`* | float | Potência (W); negativo = descarregando |
-| `battery.temperature`* | int | Temperatura do módulo DC (°C) |
+| `battery.temperature`* | int | Temperatura (°C) quando o protocolo informa; no `modbus_b` use `temperature.dcdc` |
 | `battery.current_charge`* | float | Corrente de carga (A) — só `pi30` |
 | `battery.current_discharge`* | float | Corrente de descarga (A) — só `pi30` |
+| `battery.current_partial`* | bool | `true` no `pi30` quando o inversor subnotifica as correntes (MPPT2 fora da conta) |
 | `battery.voltage_scc`* | float | Tensão vista pelo SCC (V) — só `pi30` |
 | `pv.voltage` | float \| null | Tensão PV (V) |
 | `pv.current`* | float | Corrente PV (A) — `modbus_a`, `modbus_b` e `pi30` |
-| `pv.power`* | float \| null | Potência PV (W) — `V × I`; **só do MPPT1** no `pi30` |
+| `pv.power`* | float \| null | Potência PV (W) — medida nos regs 353/391; **só do MPPT1** no `pi30` |
+| `pv.mppt_power`* | float[] \| null | Potência de cada entrada PV em W (`modbus_b`) |
 | `pv.mppt`* | int | Entrada MPPT que os campos acima descrevem (`pi30`: sempre `1`) |
 | `pv.mppt_count`* | int | Quantas entradas o modelo tem (`pi30`: `2`) |
 | `pv.mppt_unreadable`* | int[] | Entradas que o firmware não expõe (`pi30`: `[2]`, `QPIGS2` = NAK) |
@@ -301,7 +303,8 @@ Cada dispositivo é um objeto. Campos com `*` dependem do protocolo.
 | `output.apparent_power` | int | Potência aparente (VA) |
 | `load_percent`* | int | Carga em % (`modbus_a`, `modbus_b` e `pi30`) |
 | `bus_voltage`* | int | Tensão do barramento DC (só `pi30`) |
-| `temperature.dcdc`* | int | Temperatura do DCDC (°C) — só `modbus_a` |
+| `temperature.dcdc`* | int | Temperatura do módulo DC (°C) — `modbus_a` (reg 226) e `modbus_b` (reg 281) |
+| `temperature.pv`* | int | Temperatura do módulo PV (°C) — reg 305 do `modbus_b` |
 | `temperature.inverter`* | int | Temperatura do inversor (°C) — os três protocolos |
 | `automation` | objeto | Presente quando há `soc_on`/`soc_off` — ver abaixo |
 
@@ -549,16 +552,19 @@ executores falsos, sem tocar no Gate, no SSH ou no XMRig.
   vez de rodar em paralelo.
 - `inversor-59` publica modo, carga, temperatura e PV, mas **não** a tensão de rede —
   esses registradores (202/203) respondem zero nesse modelo e são omitidos.
-- **Corrente PV do mapa B ainda em validação.** À noite os registradores 352/390 valem
-  zero, então a posição foi inferida por adjacência aos pares de tensão. A primeira
-  leitura com geração deve ser conferida contra o display do inversor; o ajuste, se
-  necessário, é uma linha em `read_modbus_b`.
+- **Corrente PV do mapa B validada.** As potências medidas dos dois MPPTs (regs 353/391)
+  confirmam a escala de 352/390, e o total bate com o registrador 302 (PV total) e com a
+  nuvem do fabricante — ver a tabela de conferência em
+  [docs/PROTOCOL.md](docs/PROTOCOL.md#6-modbus-rtu--mapa-b-anenji).
 - **O `.106` (PI30) só expõe o MPPT1.** O `QPIGS` desse modelo traz apenas a entrada 1,
   que está **sem painéis** (0 W); a geração real está no MPPT2 (~256 V) e o firmware
   responde **NAK** ao `QPIGS2`. Conferido contra o app do fabricante no mesmo minuto.
   Por isso a geração desse inversor aparece como `0 W` (MPPT1) com aviso, e não entra na
   soma do painel. Detalhes em
   [docs/PROTOCOL.md](docs/PROTOCOL.md#-o-qpigs-do-106-só-traz-o-mppt1--a-geração-está-no-mppt2).
+- **As correntes da bateria do `.106` são parciais**: com 1083 W no MPPT2 e 331 W de
+  saída o `QPIGS` reportou 5 A de carga enquanto a nuvem mostrava 12 A. O card marca
+  "Carga da bateria (parcial)" e o balanço DC vira um piso (`≥`).
 - Em `pi30`, `battery.current_discharge` vem do campo `PPPPP` do `QPIGS` e é reportado
   em ampères inteiros; `current_charge` tem 1 decimal.
 - Se o dongle trocar de IP (DHCP), ajuste `devices.json`. Recomendado: reserva de IP
@@ -567,8 +573,6 @@ executores falsos, sem tocar no Gate, no SSH ou no XMRig.
 
 ## Roadmap
 
-- [ ] Validar a corrente PV do mapa B à luz do dia (registradores 352/390) e confirmar
-      a escala da potência solar do `.59`.
 - [ ] Expor tensão/frequência de rede no `.59` caso o firmware passe a responder os
       registradores 202/203.
 - [ ] Modo *proxy*: manter nuvem **e** local simultâneos, redirecionando

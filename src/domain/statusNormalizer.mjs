@@ -54,12 +54,16 @@ export class StatusNormalizer {
           dischargeCurrent,
           chargePower,
           dischargePower,
+          currentPartial: battery.current_partial === true,
           temperature: this.#finite(battery.temperature, this.#finite(this.#object(device.temperature).battery, null)),
         },
         pv: {
           mppt: this.#finite(pv.mppt, null),
           mpptCount: this.#finite(pv.mppt_count, null),
           mpptUnreadable: Array.isArray(pv.mppt_unreadable) ? pv.mppt_unreadable : [],
+          mpptPower: Array.isArray(pv.mppt_power)
+            ? pv.mppt_power.map((value) => this.#finite(value, null))
+            : [],
           voltage: this.#finite(pv.voltage, null),
           current: this.#finite(pv.current, null),
           power: this.#finite(pv.power, null),
@@ -81,6 +85,7 @@ export class StatusNormalizer {
         temperature: {
           inverter: this.#finite(this.#object(device.temperature).inverter, null),
           dcdc: this.#finite(this.#object(device.temperature).dcdc, null),
+          pv: this.#finite(this.#object(device.temperature).pv, null),
         },
       };
     });
