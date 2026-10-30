@@ -148,6 +148,21 @@ class TestParseModbusB(unittest.TestCase):
         self.assertEqual(d["pv"]["power"], 231.0)
         self.assertEqual(d["pv"]["mppt_power"], [94.0, 137.0])
 
+    def test_entradas_pv_uma_por_mppt(self):
+        pv = {"pv1": 213.8, "pv2": 198.5, "pv1_current": 2.6, "pv2_current": 3.4,
+              "pv1_power": 570, "pv2_power": 685}
+        d = im.parse_modbus_b(self.BAT, self.OUT, self.GRID, self.AC, pv)
+        self.assertEqual(d["pv"]["inputs"], [
+            {"mppt": 1, "voltage": 213.8, "current": 2.6, "power": 570.0, "readable": True},
+            {"mppt": 2, "voltage": 198.5, "current": 3.4, "power": 685.0, "readable": True},
+        ])
+
+    def test_entrada_pv_sem_leitura_fica_ilegivel(self):
+        d = im.parse_modbus_b(self.BAT, self.OUT, self.GRID, self.AC, {})
+        legiveis = [e["readable"] for e in d["pv"]["inputs"]]
+        self.assertEqual(legiveis, [False, False])
+        self.assertEqual([e["mppt"] for e in d["pv"]["inputs"]], [1, 2])
+
     def test_potencia_pv_sem_corrente_fica_none(self):
         d = im.parse_modbus_b(self.BAT, self.OUT, self.GRID, self.AC, self.PV)
         self.assertIsNone(d["pv"]["power"])
@@ -216,6 +231,20 @@ class TestParsePi30(unittest.TestCase):
         d = im.parse_qpigs(raw, "B")
         self.assertTrue(d["battery"]["current_partial"])
         self.assertEqual(d["battery"]["current_charge"], 0.0)
+
+    def test_entradas_pv_do_pi30_marcam_o_mppt2_como_ilegivel(self):
+        raw = ("(000.0 00.0 229.8 60.0 0482 0300 005 437 53.10 000 049 0059 "
+               "00.0 045.5 53.10 00000 00010110 00 00 00000 010\xd8\x7e\r")
+        d = im.parse_qpigs(raw, "B")
+        entradas = d["pv"]["inputs"]
+        self.assertEqual([e["mppt"] for e in entradas], [1, 2])
+        self.assertTrue(entradas[0]["readable"])
+        self.assertAlmostEqual(entradas[0]["voltage"], 45.5)
+        # A UI mostra a segunda entrada como "nao exposto", nunca com o valor da primeira
+        self.assertFalse(entradas[1]["readable"])
+        self.assertIsNone(entradas[1]["voltage"])
+        self.assertIsNone(entradas[1]["power"])
+        self.assertTrue(entradas[1]["reason"])
 
     def test_mppt1_com_geracao_mede_normalmente(self):
         raw = ("(000.0 00.0 229.8 60.0 0482 0310 005 436 52.80 000 046 0061 "

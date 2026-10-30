@@ -221,12 +221,16 @@ Consequência: o balanço DC sai **por baixo** nesse inversor — ele é um piso
 **O que o projeto faz com isso:**
 
 - publica `pv.mppt = 1`, `pv.mppt_count = 2` e `pv.mppt_unreadable = [2]`;
-- `pv.voltage`, `pv.current` e `pv.power` são **do MPPT1** — verdadeiros, mas não são a
-  geração total;
+- publica **`pv.inputs`** com uma entrada por MPPT: a entrada 1 traz
+  `voltage`/`current`/`power` medidos e a entrada 2 vem
+  `{"readable": false, "voltage": null, "current": null, "power": null, "reason": "..."}`;
+- `pv.voltage`, `pv.current` e `pv.power` continuam existindo e descrevem **o MPPT1** —
+  verdadeiros, mas não são a geração total;
+- o painel desenha **um visor por MPPT** e mostra a entrada 2 como `não exposto`, em vez
+  de repetir o valor da entrada 1 (era o que fazia o cartão mentir com `45,1 V`);
 - publica `pv.dc_balance` = saída + (carga − descarga) × tensão da bateria, que é uma
   grandeza **medida** no lado DC (diagnóstico, **não** é a potência de entrada PV);
-- o painel mostra `0 W` com a explicação "apenas o MPPT1 é exposto" e o balanço DC
-  abaixo, para o usuário comparar com o display.
+- o balanço aparece como piso (`≥`), para o usuário comparar com o display.
 
 > Por que não publicar o balanço como "geração": com os números da nuvem acima o balanço
 > dá 573 W (415 W de saída + 158 W de carga) contra 512 W de PV real — ou seja, ele
@@ -304,7 +308,18 @@ requisição é uma ida e volta pelo dongle.
 | **691** | **Potência nominal** | W (`11000` no `.59`) | — |
 
 A potência PV vem do **registrador medido** (353 e 391) e cai para `V × I` só quando
-o firmware não informa a potência. O total publicado é a soma das duas entradas.
+o firmware não informa a potência. O total publicado é a soma das duas entradas, e
+`pv.inputs` traz cada entrada separada:
+
+```json
+"pv": {
+  "power": 1628.0,
+  "inputs": [
+    { "mppt": 1, "voltage": 211.0, "current": 3.6, "power": 765.0, "readable": true },
+    { "mppt": 2, "voltage": 214.5, "current": 4.0, "power": 863.0, "readable": true }
+  ]
+}
+```
 
 > ⚠️ O registrador **343** (~47–49 °C) varia com a carga, mas **não** é a temperatura
 > que o fabricante publica (a nuvem mostrava 43 °C quando ele marcava 48 °C). Ele é
@@ -373,6 +388,7 @@ Ordem testada: `modbus_a` → `modbus_b` → `pi30`.
 | Broadcast UDP `HF-A11ASSISTHREAD` em 48899 | sem resposta |
 | Varredura de `fc` 11–20 | timeout |
 | `QPIGS2`/`QET`/`QLT`/`QGS*`… no `.106` | NAK — a matriz completa está na [seção 4](#comandos-aceitos) |
+| 25 variantes de comando atrás do MPPT2 | NAK: `QPIGS0/1/4/A/B`, `QPIG2`, `QPGS2/3/4`, `QPV2`, `QPIGSPV2`, `QPIRI0/3`, `QMOD2`, `QMCHGCR2`, `PE0/1/2`, `PD0/1` |
 | Slaves Modbus 0–32 no `.106` | timeout (o inversor não fala Modbus) |
 | `fc=1..10` pedindo tabela de dados | só devolve configuração do coletor, nunca telemetria |
 

@@ -80,6 +80,51 @@ test('temperaturas, potencia por MPPT e corrente parcial', () => {
   assert.equal(result[1].temperature.pv, null);
 });
 
+test('normaliza uma entrada PV por MPPT e preserva a ilegivel', () => {
+  const result = new StatusNormalizer().normalize({
+    timestamp: '2026-10-30T10:45:00-03:00',
+    devices: {
+      a: {
+        online: true,
+        battery: { soc: 62, voltage: 52.7 },
+        pv: {
+          power: 1255,
+          inputs: [
+            { mppt: 1, voltage: 213.8, current: 2.6, power: 570, readable: true },
+            { mppt: 2, voltage: 198.5, current: 3.4, power: 685, readable: true },
+          ],
+        },
+        output: {},
+        grid: {},
+      },
+      b: {
+        online: true,
+        battery: { soc: 45, voltage: 53.1 },
+        pv: {
+          power: 0,
+          inputs: [
+            { mppt: 1, voltage: 45.5, current: 0, power: 0, readable: true },
+            { mppt: 2, voltage: null, current: null, power: null, readable: false, reason: 'sem QPIGS2' },
+          ],
+        },
+        output: {},
+        grid: {},
+      },
+    },
+  }, [{ name: 'a' }, { name: 'b' }]);
+
+  assert.deepEqual(result[0].pv.inputs, [
+    { mppt: 1, voltage: 213.8, current: 2.6, power: 570, readable: true, reason: null },
+    { mppt: 2, voltage: 198.5, current: 3.4, power: 685, readable: true, reason: null },
+  ]);
+  // MPPT2 sem leitura nao pode herdar o valor do MPPT1
+  assert.equal(result[1].pv.inputs[1].readable, false);
+  assert.equal(result[1].pv.inputs[1].voltage, null);
+  assert.equal(result[1].pv.inputs[1].power, null);
+  assert.equal(result[1].pv.inputs[1].reason, 'sem QPIGS2');
+  assert.equal(result[1].pv.inputs[0].power, 0, 'zero medido continua zero');
+});
+
 test('offline preserva motivo e hora da ultima leitura', () => {
   const result = new StatusNormalizer().normalize({
     timestamp: '2026-10-30T09:00:00-03:00',

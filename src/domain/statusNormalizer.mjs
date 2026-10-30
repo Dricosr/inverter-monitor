@@ -64,6 +64,7 @@ export class StatusNormalizer {
           mpptPower: Array.isArray(pv.mppt_power)
             ? pv.mppt_power.map((value) => this.#finite(value, null))
             : [],
+          inputs: this.#pvInputs(pv.inputs),
           voltage: this.#finite(pv.voltage, null),
           current: this.#finite(pv.current, null),
           power: this.#finite(pv.power, null),
@@ -93,6 +94,21 @@ export class StatusNormalizer {
 
   #object(value) {
     return value && typeof value === 'object' ? value : {};
+  }
+
+  /** Uma entrada PV por MPPT: valores nulos continuam nulos (nao viram zero). */
+  #pvInputs(value) {
+    if (!Array.isArray(value)) return [];
+    return value
+      .filter((entry) => entry && typeof entry === 'object')
+      .map((entry, index) => ({
+        mppt: this.#finite(entry.mppt, index + 1),
+        voltage: this.#finite(entry.voltage, null),
+        current: this.#finite(entry.current, null),
+        power: this.#finite(entry.power, null),
+        readable: entry.readable !== false,
+        reason: typeof entry.reason === 'string' ? entry.reason : null,
+      }));
   }
 
   #finite(value, fallback = Number.NaN) {

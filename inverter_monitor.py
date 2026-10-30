@@ -54,7 +54,7 @@ DONGLE_UDP_PORT = 58899
 LOCAL_TCP_PORT = 8899  # porta em que o dongle conecta de volta (fixa no firmware)
 CLOUD_RECOVERY_DELAY = 1.5
 
-__version__ = "1.1.3"
+__version__ = "1.1.4"
 
 log = logging.getLogger("inverter")
 
@@ -254,6 +254,20 @@ def _pv_measured(value: int | None) -> float | None:
     return float(value) if 0 <= value <= 20000 else None
 
 
+def _pv_input(index: int, voltage: float | None, current: float | None,
+              power: float | None) -> dict:
+    """Uma entrada PV: o que o inversor informou, sem inventar o que faltou."""
+    entrada = {"mppt": index, "voltage": voltage, "current": current, "power": power}
+    entrada["readable"] = any(v is not None for v in (voltage, current, power))
+    return entrada
+
+
+def _pv_input_unreadable(index: int, reason: str) -> dict:
+    """Entrada que existe no hardware mas o firmware nao expoe."""
+    return {"mppt": index, "voltage": None, "current": None, "power": None,
+            "readable": False, "reason": reason}
+
+
 def _signed_or_none(value: int | None) -> int | None:
     return None if value is None else s16(value)
 
@@ -384,6 +398,8 @@ def parse_modbus_b(bat: list[int], out: list[int], grid: list[int],
             "current": round(sum(currents), 1) if currents else None,
             "power": round(sum(powers), 1) if powers else None,
             "mppt_power": [pv1_p, pv2_p] if powers else None,
+            "inputs": [_pv_input(1, pv1_v, pv1_i, pv1_p),
+                       _pv_input(2, pv2_v, pv2_i, pv2_p)],
         },
         "grid": {"voltage": grid_v, "frequency": grid_f},
         "output": {
@@ -460,6 +476,12 @@ def parse_qpigs(raw: str, mode_letter: str = "?", serial: str | None = None) -> 
             "current": round(pv_current, 1),
             "power": pv_power,
             "dc_balance": dc_balance,
+            "inputs": [
+                _pv_input(1, round(pv_voltage, 1), round(pv_current, 1), pv_power),
+                # QPIGS2 e as 25 variantes testadas respondem NAK: o firmware nao
+                # expoe a segunda entrada, nem por ASCII nem por Modbus RTU.
+                _pv_input_unreadable(2, "o firmware deste modelo não expõe o MPPT2"),
+            ],
         },
         "grid": {"voltage": num(0), "frequency": num(1)},
         "output": {
@@ -474,15 +496,33 @@ def parse_qpigs(raw: str, mode_letter: str = "?", serial: str | None = None) -> 
     }
 
 
+def _pi30_ask(link: Dongle, command: bytes, timeout: float, attempts: int = 3) -> str:
+    """Envia um comando ASCII e devolve o texto da resposta.
+
+    O `.106` responde `(NAKss` de forma intermitente quando o dongle esta atendendo a
+    nuvem e o inversor ao mesmo tempo, e a leitura seguinte ja voltava boa. Repetir sai
+    mais barato do que marcar o inversor como offline por um NAK passageiro.
+    """
+    last: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return link.ask(4, pi30(command), timeout=timeout).decode("ascii", "replace")
+        except Exception as exc:  # noqa: BLE001 - timeout tambem merece nova tentativa
+            last = exc
+            if attempt < attempts:
+                time.sleep(0.25)
+    raise last if last else RuntimeError("sem resposta")
+
+
 def read_pi30(link: Dongle) -> dict:
     """Familia PI30 (ASCII): QPIGS + QMOD + QID."""
-    raw = link.ask(4, pi30(b"QPIGS"), timeout=12).decode("ascii", "replace")
+    raw = _pi30_ask(link, b"QPIGS", timeout=12)
     try:
-        mode_letter = link.ask(4, pi30(b"QMOD"), timeout=6).decode("ascii", "replace")[1:2]
+        mode_letter = _pi30_ask(link, b"QMOD", timeout=6, attempts=2)[1:2]
     except Exception:
         mode_letter = "?"
     try:
-        serial = link.ask(4, pi30(b"QID"), timeout=6).decode("ascii", "replace")[1:-3]
+        serial = _pi30_ask(link, b"QID", timeout=6, attempts=2)[1:-3]
     except Exception:
         serial = None
     return parse_qpigs(raw, mode_letter, serial)

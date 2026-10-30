@@ -3,6 +3,34 @@
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 e versionamento [SemVer](https://semver.org/lang/pt-BR/).
 
+## [1.1.4] — 2026-10-31
+
+### Corrigido
+
+- **A UI mostrava um único "Tensão PV", e esse número era do MPPT1.** No `.106` ele
+  aparecia como `45,1 V` enquanto o MPPT2 estava com ~302 V — o cartão escondia que
+  existia uma segunda entrada gerando. Agora cada entrada PV tem seu próprio visor.
+- **O total de geração passou a somar as entradas, não a herdar a primeira.** O `.59`
+  mostra `MPPT1 765 W · MPPT2 863 W → 1.628 W`; o resumo do topo usa a mesma soma.
+
+### Adicionado
+
+- **`pv.inputs`: uma entrada por MPPT**, com `mppt`, `voltage`, `current`, `power` e
+  `readable`. Entrada que o firmware esconde vem com `readable: false`, os valores em
+  `null` e um `reason` — nunca com o número da entrada vizinha.
+- **Bloco "Entradas PV" em cada cartão**, com um visor por MPPT (`MPPT1 758 W · 217,7 V ·
+  3,4 A`) e o somatório no cabeçalho. Quando falta uma entrada, o cabeçalho marca
+  `1/2` e o cartão mostra `não exposto` com o motivo.
+- O cartão de resumo virou **"Geração solar (parcial)"** quando algum inversor esconde
+  uma entrada, com o tooltip dizendo quantas ficaram de fora.
+
+### Não suportado (documentado)
+
+- **O MPPT2 do `.106` não é legível pela LAN.** Além de `QPIGS2`, foram testadas 25
+  variantes (`QPIGS0/1/4/A/B`, `QPIG2`, `QPGS2/3/4`, `QPV2`, `QPIRI0/3`, `QMOD2`,
+  `PE0/1/2`, `PD0/1`…) e **todas** responderam `NAK`. O valor de ~302 V só existe no
+  canal da nuvem.
+
 ## [1.1.3] — 2026-10-31
 
 ### Corrigido

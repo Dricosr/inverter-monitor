@@ -178,19 +178,19 @@ function renderSummary(dashboard) {
       online < dashboard.devices.length
         ? `Média dos ${online} inversores que responderam agora`
         : 'Média do estado de carga das baterias'),
-    summaryCard('Geração solar', formatW(solar.value), solarHintText(solar)),
+    summaryCard(`Geração solar${solar.hiddenInputs ? ' (parcial)' : ''}`, formatW(solar.value), solarHintText(solar)),
     summaryCard('Potência de saída', formatW(output), 'Soma da potência entregue às cargas'),
   ].join('');
 }
 
 /**
- * Soma o PV medido de todas as entradas que os inversores expõem. Inversor que
- * esconde uma entrada (multi-MPPT sem `QPIGS2`) deixa o total como piso.
+ * Soma o PV medido de todas as entradas que os inversores expõem. Entrada que o
+ * firmware esconde (multi-MPPT sem `QPIGS2`) deixa o total como piso.
  */
 function solarTotal(devices) {
   let measured = 0;
   let any = false;
-  let partial = 0;
+  let hiddenInputs = 0;
   let unmeasured = 0;
   for (const device of devices) {
     if (!device.online) continue;
@@ -200,16 +200,22 @@ function solarTotal(devices) {
     } else {
       unmeasured += 1;
     }
-    if (device.pv.mpptUnreadable.length) partial += 1;
+    hiddenInputs += device.pv.inputs.filter((input) => !input.readable).length;
   }
-  return { value: any ? measured : null, partial, unmeasured };
+  return { value: any ? measured : null, hiddenInputs, unmeasured };
 }
 
 function solarHintText(solar) {
-  if (solar.partial === 1) return 'Soma parcial: 1 inversor não expõe todas as entradas PV, só o MPPT1 é lido';
-  if (solar.partial > 1) return `Soma parcial: ${solar.partial} inversores não expõem todas as entradas PV`;
-  if (solar.unmeasured) return `Soma apenas dos inversores que medem a corrente PV — ${solar.unmeasured} não informa(m) esse dado`;
-  return 'Soma da potência fotovoltaica agora';
+  if (solar.hiddenInputs === 1) {
+    return 'Soma parcial: 1 entrada PV não é exposta pelo firmware — o card do inversor mostra qual';
+  }
+  if (solar.hiddenInputs > 1) {
+    return `Soma parcial: ${solar.hiddenInputs} entradas PV não são expostas pelo firmware`;
+  }
+  if (solar.unmeasured) {
+    return `Soma apenas dos inversores que informam PV — ${solar.unmeasured} não informa(m) esse dado`;
+  }
+  return 'Soma de todas as entradas PV agora';
 }
 
 function formatPower(value) {
@@ -251,15 +257,14 @@ function renderDevices(devices) {
           </div>
           <div class="metrics">
             ${metric('Potência de saída', formatW(device.output.activePower))}
-            ${metric('Geração solar', formatPower(device.pv.power), solarHint(device))}
             ${metric('Carga no inversor', device.loadPercent == null ? '—' : `${device.loadPercent}%`)}
             ${metric('Temperatura', device.temperature.inverter == null ? '—' : `${device.temperature.inverter} °C`)}
             ${metric('Temp. PV', device.temperature.pv == null ? '—' : `${device.temperature.pv} °C`, 'Temperatura do módulo fotovoltaico')}
             ${metric('Tensão da bateria', device.battery.voltage == null ? '—' : `${device.battery.voltage.toFixed(1)} V`)}
             ${metric(partialLabel('Carga da bateria', device), formatAmps(device.battery.chargeCurrent), currentHint(device, 'Carga da bateria'))}
             ${metric(partialLabel('Descarga da bateria', device), formatAmps(device.battery.dischargeCurrent), currentHint(device, 'Descarga da bateria'))}
-            ${metric('Tensão PV', device.pv.voltage == null ? '—' : `${device.pv.voltage.toFixed(1)} V`)}
           </div>
+          ${pvBlock(device)}
           ${device.online ? balanceLine(device) : ''}
         </div>
       </article>`;
@@ -279,6 +284,57 @@ function formatAmps(value) {
   return Number.isFinite(value) ? `${value.toFixed(1)} A` : '—';
 }
 
+/**
+ * Entradas PV: um visor por MPPT com tensao, corrente e potencia, mais a soma das
+ * entradas legiveis. Entrada que o firmware esconde aparece como "nao exposto" em
+ * vez de herdar o numero da outra — e o que fazia a UI mentir.
+ */
+function pvBlock(device) {
+  if (!device.online) return '';
+  const inputs = device.pv.inputs;
+  if (!inputs.length) {
+    return `<div class="pv-block">
+      <div class="pv-head"><span>Entradas PV</span><strong>${escapeHtml(formatW(device.pv.power))}</strong></div>
+      <p class="pv-empty">Este inversor não informa quantas entradas PV tem — só a potência total.</p>
+    </div>`;
+  }
+
+  const readable = inputs.filter((input) => input.readable && Number.isFinite(input.power));
+  const total = readable.reduce((sum, input) => sum + input.power, 0);
+  const hidden = inputs.length - readable.length;
+  const totalLabel = Number.isFinite(device.pv.power) && !hidden ? device.pv.power : (readable.length ? total : null);
+  const hint = hidden
+    ? `Soma de ${readable.length} de ${inputs.length} entradas: ${hidden} não é exposta pelo firmware`
+    : `Soma das ${inputs.length} entradas PV`;
+
+  return `<div class="pv-block">
+    <div class="pv-head" title="${escapeHtml(hint)}">
+      <span>Entradas PV${hidden ? ` · ${readable.length}/${inputs.length}` : ''}</span>
+      <strong>${escapeHtml(formatW(totalLabel))}</strong>
+    </div>
+    <div class="mppt-grid">${inputs.map(mpptCard).join('')}</div>
+  </div>`;
+}
+
+function mpptCard(input) {
+  const label = `MPPT${input.mppt}`;
+  if (!input.readable) {
+    const reason = input.reason || 'o firmware não expõe esta entrada';
+    return `<div class="mppt mppt--unknown" title="${escapeHtml(`${label}: ${reason}`)}">
+      <span>${escapeHtml(label)}</span>
+      <strong>não exposto</strong>
+      <small>${escapeHtml(reason)}</small>
+    </div>`;
+  }
+  const volts = Number.isFinite(input.voltage) ? `${input.voltage.toFixed(1)} V` : '—';
+  const amps = Number.isFinite(input.current) ? `${input.current.toFixed(1)} A` : '—';
+  return `<div class="mppt" title="${escapeHtml(`${label}: ${volts} × ${amps}`)}">
+    <span>${escapeHtml(label)}</span>
+    <strong>${escapeHtml(formatW(input.power))}</strong>
+    <small>${escapeHtml(`${volts} · ${amps}`)}</small>
+  </div>`;
+}
+
 /** O QPIGS de um inversor de dois MPPTs so mede as correntes do SCC1. */
 function partialLabel(label, device) {
   return device.battery.currentPartial ? `${label} (parcial)` : label;
@@ -291,34 +347,16 @@ function currentHint(device, label) {
   return label === 'Carga da bateria' ? 'Corrente entrando na bateria' : 'Corrente saindo da bateria';
 }
 
-/** Mostra a conta quando a potência solar nao foi medida, para dar como conferir. */
+/** Complemento do bloco PV: quando falta uma entrada, mostra o balanco DC como piso. */
 function balanceLine(device) {
-  if (Number.isFinite(device.pv.dcBalance)) {
-    if (device.pv.mpptCount > 1) {
-      const missing = device.pv.mpptUnreadable.length
-        ? `MPPT${device.pv.mpptUnreadable.join(', MPPT')}`
-        : 'o outro MPPT';
-      const hint = device.battery.currentPartial
-        ? 'A corrente da bateria é parcial, então o balanço DC é um piso: a geração real é maior'
-        : 'QPIGS2 responde NAK: o inversor não expõe a segunda entrada PV';
-      return `<p class="device-diag" title="${escapeHtml(hint)}">${escapeHtml(missing)} não é exposto por este inversor · balanço DC ≥ ${escapeHtml(formatW(device.pv.dcBalance))}</p>`;
-    }
-    return '';
-  }
-  if (device.pv.mpptPower.length > 1 && device.pv.mpptPower.some(Number.isFinite)) {
-    const parts = device.pv.mpptPower.map((power, index) => `MPPT${index + 1} ${formatW(power)}`);
-    return `<p class="device-diag" title="Potência medida em cada entrada PV">${escapeHtml(parts.join(' · '))}</p>`;
-  }
-  return '';
-}
-
-function solarHint(device) {
-  if (!device.online) return null;
-  if (device.pv.mpptCount > 1 && device.pv.mppt) {
-    return `Apenas o MPPT${device.pv.mppt} é exposto por este inversor; a geração pode estar no outro MPPT`;
-  }
-  if (Number.isFinite(device.pv.power)) return 'Potência medida (tensão × corrente PV)';
-  return 'O inversor não informa a corrente PV';
+  if (!Number.isFinite(device.pv.dcBalance)) return '';
+  const hidden = device.pv.inputs.filter((input) => !input.readable);
+  if (!hidden.length) return '';
+  const hint = device.battery.currentPartial
+    ? 'A corrente da bateria é parcial, então o balanço DC é um piso: a geração real é maior'
+    : 'O firmware não expõe a segunda entrada PV, então a geração real é maior que a soma acima';
+  const names = hidden.map((input) => `MPPT${input.mppt}`).join(' e ');
+  return `<p class="device-diag" title="${escapeHtml(hint)}">Com ${escapeHtml(names)} fora da leitura, a geração real é maior que a soma acima. Balanço DC (saída + carga da bateria): ≥ ${escapeHtml(formatW(device.pv.dcBalance))}</p>`;
 }
 
 function offlineReason(device) {

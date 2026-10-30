@@ -136,33 +136,43 @@ card do painel diz de qual entrada o número veio.
 | SOC | ✅ | ✅ | ✅ |
 | Tensão da bateria | ✅ | ✅ | ✅ |
 | Corrente / potência da bateria | ✅ | ✅ | ⚠️ **parcial** |
-| PV — tensão | ✅ | ✅ (2 MPPTs) | ✅ só MPPT1 |
-| PV — potência | ✅ | ✅ **medida por MPPT** | ⚠️ só MPPT1 |
+| PV — tensão por MPPT | 1 entrada | ✅ **MPPT1 e MPPT2** | ✅ só MPPT1 |
+| PV — corrente por MPPT | 1 entrada | ✅ **MPPT1 e MPPT2** | ✅ só MPPT1 |
+| PV — potência por MPPT | 1 entrada | ✅ **medida por MPPT** | ⚠️ só MPPT1 |
 | Temperatura do inversor | ✅ | ✅ (reg 231) | ✅ |
 | Temperatura do painel / módulo DC | ✅ DC | ✅ ambos | — |
 | Rede (tensão/frequência) | ✅ | — | — |
+
+Cada entrada PV vira um objeto em **`pv.inputs`** e o painel desenha **um visor por
+MPPT**, com o somatório no cabeçalho do bloco. Entrada que o firmware não expõe aparece
+como `não exposto` — nunca herda o número da entrada vizinha.
 
 ### O caso do MPS 10.2 (`.106`)
 
 Esse inversor tem **dois MPPTs** e o firmware **não implementa `QPIGS2`** (responde `NAK`;
 idem `QPGS0/1`, `QET`, `QLT`, `QBE`, `QPIZ`, `QPIC`, `QPIGS3`). O `QPIGS` carrega apenas
-o **MPPT1**, que está **sem painéis**. A geração real (~317 V, ~1083 W) está no MPPT2 e
-**não sai por nenhum comando PI30 aceito**; o Modbus RTU também não responde nessa
-unidade (slaves 0–32 testados, todos timeout).
+o **MPPT1**, que está **sem painéis**. A geração real (~302 V, ~1083 W) está no MPPT2 e
+**não sai por nenhum comando aceito** — além do `QPIGS2`, 25 variantes
+(`QPIGS0/1/4/A/B`, `QPIG2`, `QPGS2/3/4`, `QPV2`, `QPIRI0/3`, `QMOD2`, `PE0/1/2`,
+`PD0/1`…) responderam `NAK`; o Modbus RTU também não responde nessa unidade (slaves 0–32
+testados, todos timeout).
 
 Conferido contra o app do fabricante **no mesmo minuto**:
 
 | Fonte | PV1 | PV2 | Total |
 | --- | --- | --- | --- |
 | `QPIGS` local | 41,7 V / 0 W | não exposto | — |
-| App do fabricante | 41,7 V / 0 W | 317,5 V / **1083 W** | **1083 W** |
+| App do fabricante | 41,7 V / 0 W | 302 V / **1083 W** | **1083 W** |
+
+O painel reproduz exatamente isso: o visor do **MPPT1** mostra `0 W · 41,7 V · 0,0 A` e o
+do **MPPT2** mostra `não exposto`, com o balanço DC como piso.
 
 A corrente da bateria também é subnotificada: com 1083 W no MPPT2 e 331 W de saída, o
 `QPIGS` reportou **5 A** de carga enquanto a nuvem mostrava **12 A**. Por isso o coletor
 publica `battery.current_partial = true` e o painel mostra **"Carga da bateria (parcial)"**.
 
 Consequência prática: o **balanço DC** desse inversor (`saída + carga − descarga`) é um
-**piso**, exibido como `balanço DC ≥ N W`. Ele nunca é publicado como "geração".
+**piso**, exibido como `≥ N W`. Ele nunca é publicado como "geração".
 
 ## Painel web
 
@@ -179,11 +189,13 @@ nunca se torna um segundo coletor concorrente.
   inversores sem resposta e falhas de ação — cada um com detalhe no tooltip;
 - cartões de resumo (SOC médio, geração solar, potência entregue) somando **apenas**
   quem respondeu;
-- um card por inversor com 9 métricas: potência de saída, geração solar, carga no
+- um card por inversor com as métricas de operação (potência de saída, carga no
   inversor, temperatura do inversor, temperatura do painel, tensão da bateria, corrente
-  de carga, corrente de descarga e tensão PV;
-- linha de diagnóstico sob as métricas: `MPPT1 227 W · MPPT2 346 W` no `.59`, ou
-  `MPPT2 não é exposto por este inversor · balanço DC ≥ 283 W` no `.106`;
+  de carga, corrente de descarga);
+- **bloco "Entradas PV" com um visor por MPPT** — `MPPT1 765 W · 211,0 V · 3,6 A` e
+  `MPPT2 863 W · 214,5 V · 4,0 A` — mais o somatório no cabeçalho do bloco;
+- entrada que o firmware esconde aparece tracejada como `não exposto`, com o motivo e o
+  balanço DC como piso (`≥`), para o número nunca mentir;
 - barra de bateria colorida por faixa, aviso de bateria baixa abaixo de 30 % e nome
   amigável persistido em `data/dashboard.json`;
 - nada é arredondado para "0": ausência de leitura aparece como `—` com o motivo no
@@ -348,8 +360,8 @@ cron/agendador).
 
 ```powershell
 $s = Invoke-RestMethod http://localhost:8080/status
-$s.devices.'inversor-59'.battery.soc            # 62
-$s.devices.'inversor-59'.pv.mppt_power          # 203, 321
+$s.devices.'inversor-59'.battery.soc            # 70
+$s.devices.'inversor-59'.pv.inputs | Select-Object mppt, voltage, current, power
 $s.devices.'inversor-106'.battery.current_partial  # True
 ```
 
@@ -392,10 +404,11 @@ Cada dispositivo é um objeto. Campos com `*` dependem do protocolo.
 | `battery.current_partial`* | bool | `true` no `pi30` quando as correntes não cobrem todos os MPPTs |
 | `battery.voltage_scc`* | float | Tensão vista pelo SCC (V) — só `pi30` |
 | `battery.temperature`* | int | Temperatura informada pelo protocolo (mapa A); no mapa B use `temperature.dcdc` |
-| `pv.voltage` | float \| null | Tensão PV (V) |
-| `pv.voltage2`* | float | Tensão do 2º MPPT (`modbus_b`) |
+| `pv.voltage` | float \| null | Tensão PV do **MPPT1** (V) |
+| `pv.voltage2`* | float | Tensão do **MPPT2** (`modbus_b`) |
 | `pv.current`* | float | Corrente PV (A) |
-| `pv.power`* | float \| null | Potência PV (W) — medida (regs 353/391); **só do MPPT1** no `pi30` |
+| `pv.power`* | float \| null | Potência PV (W) — **soma das entradas legíveis**; no `pi30` só o MPPT1 |
+| `pv.inputs`* | objeto[] | **Uma entrada por MPPT** com `mppt`, `voltage`, `current`, `power` e `readable` |
 | `pv.mppt_power`* | float[] \| null | Potência de cada entrada PV em W (`modbus_b`) |
 | `pv.mppt`* | int | Entrada que os campos acima descrevem (`pi30`: sempre `1`) |
 | `pv.mppt_count`* | int | Quantas entradas o modelo tem (`pi30`: `2`) |
@@ -547,8 +560,9 @@ executores falsos, sem tocar no Gate, no SSH ou no XMRig.
 | Ciclo lento | Dongle morto gastando todo o timeout | Ajuste `--connect-timeout` ou confira `devices.json` |
 | Painel em 500 | Arquivo de estado corrompido | O `JsonStore` já se recupera e guarda `*.corrupt-<data>` |
 | SOC `0` com todos os campos zerados | Mapa errado respondendo com zeros | A validação de plausibilidade já rejeita isso na detecção |
-| `Geração solar 0 W` no `.106` de dia | MPPT1 sem painéis; a geração está no MPPT2, que não é legível | Esperado. Compare com o balanço DC (`≥`) |
+| `Geração solar 0 W` no `.106` de dia | MPPT1 sem painéis; a geração está no MPPT2, que não é legível | Esperado. O cartão mostra `MPPT2 não exposto` e o balanço DC (`≥`) |
 | `Corrente de carga (parcial)` | `QPIGS` não cobre o MPPT2 | Esperado. Use o valor da nuvem como referência |
+| `MPPT2 não exposto` no `.106` | O firmware não implementa `QPIGS2` e 25 variantes deram NAK | Esperado. O bloco PV mostra o piso pelo balanço DC |
 | Temperatura `—` | Modelo não expõe aquele sensor | Esperado; o tooltip da métrica explica |
 | EP2 volta às threads máximas sozinha | `"watch": true` no `config.json` do XMRig | Use `"watch": false` |
 | Regra em `Conflito` | A pausa do Gate foi criada por outra origem | A automação não desfaz pausa alheia; libere manualmente |
@@ -566,8 +580,8 @@ executores falsos, sem tocar no Gate, no SSH ou no XMRig.
   porta HTTP livre: se outra instância já estiver na 8080, a nova encerra em vez de rodar
   em paralelo.
 - **O `.106` não expõe o MPPT2** e subnotifica a corrente da bateria (ver
-  [acima](#o-caso-do-mps-102-106)). Nenhum comando PI30 aceito por essa unidade devolve a
-  segunda entrada PV.
+  [acima](#o-caso-do-mps-102-106)). Além de `QPIGS2`, 25 variantes de comando foram
+  testadas e todas responderam `NAK`. O painel mostra a entrada como `não exposto`.
 - `inversor-59` publica modo, carga, temperaturas e PV, mas **não** tensão de rede — os
   registradores 202/203 respondem zero nesse modelo.
 - Em `pi30`, `current_charge` tem 1 decimal e `current_discharge` é inteiro.
