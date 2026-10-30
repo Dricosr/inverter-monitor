@@ -385,22 +385,17 @@ def parse_qpigs(raw: str, mode_letter: str = "?", serial: str | None = None) -> 
     discharge_current = num(15)
     output_active = int(num(5))
 
-    # Neste firmware (MPS 10.2) o campo de corrente PV do QPIGS vem sempre 00.0,
-    # mesmo com o inversor gerando: a corrente de carga e a de descarga, sim, sao
-    # reais. Entao potência PV so existe quando a corrente foi informada; caso
-    # contrario resta a estimativa pelo balanco de energia (sem rede eletrica,
-    # tudo que a carga consome e a bateria recebe veio do PV).
-    if pv_current > 0:
-        pv_power = _pv_power(round(pv_voltage, 1), round(pv_current, 1))
-    elif pv_voltage <= 0:
-        pv_power = 0.0
-    else:
-        pv_power = None
+    # Este inversor tem DOIS MPPTs, mas o `QPIGS` so carrega o MPPT1: o dongle/inversor
+    # nao implementa `QPIGS2` (responde NAK). Confirmado contra a nuvem do fabricante
+    # no mesmo instante: QPIGS traz 47,3 V / 0 W (MPPT1, sem paineis) enquanto o app
+    # mostra PV1 47,3 V / 0 W e PV2 256,4 V / 512 W. Ou seja: os campos 12/13 estao
+    # corretos, mas descrevem apenas a entrada 1.
+    pv_power = _pv_power(round(pv_voltage, 1), round(pv_current, 1))
 
-    pv_estimated = None
-    if pv_power is None:
-        balance = output_active + (charge_current - discharge_current) * battery_voltage
-        pv_estimated = round(max(0.0, balance), 1)
+    # Balanco no lado DC: potencia de saida mais o que entra/sai da bateria. E uma
+    # grandeza medida, util para diagnostico — NAO e a potencia de entrada PV.
+    balance = output_active + (charge_current - discharge_current) * battery_voltage
+    dc_balance = round(balance, 1)
 
     return {
         "protocol": "pi30",
@@ -415,10 +410,13 @@ def parse_qpigs(raw: str, mode_letter: str = "?", serial: str | None = None) -> 
             "voltage_scc": num(14),
         },
         "pv": {
-            "voltage": pv_voltage,
-            "current": pv_current,
+            "mppt": 1,
+            "mppt_count": 2,
+            "mppt_unreadable": [2],
+            "voltage": round(pv_voltage, 1),
+            "current": round(pv_current, 1),
             "power": pv_power,
-            "power_estimated": pv_estimated,
+            "dc_balance": dc_balance,
         },
         "grid": {"voltage": num(0), "frequency": num(1)},
         "output": {

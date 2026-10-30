@@ -32,7 +32,7 @@ test('campo ausente nao vira zero', () => {
       a: {
         online: true,
         battery: { soc: 47, voltage: 52.9 },
-        pv: { voltage: 48, current: 0, power: null, power_estimated: 841 },
+        pv: { voltage: 48, current: 0, power: null, dc_balance: 841 },
         grid: { voltage: null, frequency: null },
         output: { active_power: 312, current: null },
         temperature: {},
@@ -41,7 +41,7 @@ test('campo ausente nao vira zero', () => {
   }, [{ name: 'a' }]);
 
   assert.equal(result[0].pv.power, null, 'ausente deve continuar ausente');
-  assert.equal(result[0].pv.powerEstimated, 841);
+  assert.equal(result[0].pv.dcBalance, 841);
   assert.equal(result[0].grid.voltage, null);
   assert.equal(result[0].output.current, null);
   assert.equal(result[0].temperature.inverter, null);
@@ -72,3 +72,4 @@ test('offline preserva motivo e hora da ultima leitura', () => {
   assert.equal(result[0].lastOk, '2026-10-30T08:55:00-03:00');
   assert.equal(result[0].soc, null);
 });
+

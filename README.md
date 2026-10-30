@@ -116,10 +116,11 @@ Portanto, ele nunca se torna um segundo coletor concorrente. Entre os recursos:
 - cartão de automação na barra lateral mostrando quantas regras estão atuando;
 - SOC, tensão da bateria, PV, carga, saída e temperatura por inversor, com barra de
   bateria colorida por faixa e aviso de bateria baixa abaixo de 30%;
-- potência solar calculada por `V × I` quando o inversor só informa tensão e corrente
-  (PI30) ou quando as duas entradas PV são conhecidas (mapa B);
-- quando o modelo não informa a corrente PV (caso do `.106`), o painel mostra `≈ W` com a
-  estimativa por balanço de energia, nunca um falso `0 W`;
+- potência solar calculada por `V × I` quando o inversor informa tensão e corrente
+  (mapa B, e MPPT1 no PI30);
+- por inversor: potência de saída, geração, carga, temperatura, tensão e corrente de
+  carga/descarga da bateria e tensão PV — mais uma linha com o balanço DC quando a
+  geração não é medida, para conferir com o display;
 - nomes amigáveis persistidos em `data/dashboard.json`;
 - Fila do Gate (pausa e jobs na fila) e mineração EP2/ai-node com hash rate de agora,
   1 min e 15 min;
@@ -285,8 +286,11 @@ Cada dispositivo é um objeto. Campos com `*` dependem do protocolo.
 | `battery.voltage_scc`* | float | Tensão vista pelo SCC (V) — só `pi30` |
 | `pv.voltage` | float \| null | Tensão PV (V) |
 | `pv.current`* | float | Corrente PV (A) — `modbus_a`, `modbus_b` e `pi30` |
-| `pv.power`* | float \| null | Potência PV (W) medida; `null` quando o modelo não informa a corrente |
-| `pv.power_estimated`* | float \| null | Estimativa por balanço de energia quando `pv.power` é `null` |
+| `pv.power`* | float \| null | Potência PV (W) — `V × I`; **só do MPPT1** no `pi30` |
+| `pv.mppt`* | int | Entrada MPPT que os campos acima descrevem (`pi30`: sempre `1`) |
+| `pv.mppt_count`* | int | Quantas entradas o modelo tem (`pi30`: `2`) |
+| `pv.mppt_unreadable`* | int[] | Entradas que o firmware não expõe (`pi30`: `[2]`, `QPIGS2` = NAK) |
+| `pv.dc_balance`* | float | Balanço medido no lado DC: saída + carga − descarga (W) |
 | `pv.voltage2`* | float | Tensão do 2º MPPT (`modbus_b`) |
 | `grid.voltage` | float \| null | Tensão da rede (V); `null` se não exposta |
 | `grid.frequency` | float \| null | Frequência da rede (Hz) |
@@ -549,10 +553,12 @@ executores falsos, sem tocar no Gate, no SSH ou no XMRig.
   zero, então a posição foi inferida por adjacência aos pares de tensão. A primeira
   leitura com geração deve ser conferida contra o display do inversor; o ajuste, se
   necessário, é uma linha em `read_modbus_b`.
-- **O `.106` (PI30) não informa corrente PV.** O campo 12 do `QPIGS` fica em `00.0` mesmo
-  gerando, então a potência solar desse inversor é uma **estimativa** (saída + carga −
-  descarga) mostrada como `≈` no painel. O `.59` mede de verdade. Detalhes e as amostras
-  cruas estão em [docs/PROTOCOL.md](docs/PROTOCOL.md#-o-campo-12-desta-unidade-mps-102-vem-sempre-000).
+- **O `.106` (PI30) só expõe o MPPT1.** O `QPIGS` desse modelo traz apenas a entrada 1,
+  que está **sem painéis** (0 W); a geração real está no MPPT2 (~256 V) e o firmware
+  responde **NAK** ao `QPIGS2`. Conferido contra o app do fabricante no mesmo minuto.
+  Por isso a geração desse inversor aparece como `0 W` (MPPT1) com aviso, e não entra na
+  soma do painel. Detalhes em
+  [docs/PROTOCOL.md](docs/PROTOCOL.md#-o-qpigs-do-106-só-traz-o-mppt1--a-geração-está-no-mppt2).
 - Em `pi30`, `battery.current_discharge` vem do campo `PPPPP` do `QPIGS` e é reportado
   em ampères inteiros; `current_charge` tem 1 decimal.
 - Se o dongle trocar de IP (DHCP), ajuste `devices.json`. Recomendado: reserva de IP

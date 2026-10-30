@@ -146,46 +146,44 @@ bytes de CRC (`73 73`) são impressos como `s` `s` — daí o visual `(NAKss\r`.
 Como o inversor estava em modo bateria (rede `000.0` V), a consistência foi validada por
 energia: 983 W de saída a 52,2 V ⇒ ≈ 21 A de descarga — coerente com o campo 15.
 
-### ⚠️ O campo 12 desta unidade (MPS 10.2) vem sempre `00.0`
+### ⚠️ O `QPIGS` do `.106` só traz o **MPPT1** — a geração está no MPPT2
 
-Com o inversor **gerando**, o `QPIGS` do `.106` reporta tensão PV (campo 13, 39–49 V) mas
-a corrente PV (campo 12) fica travada em `00.0`. A corrente de carga (campo 9) e a de
-descarga (campo 15), por outro lado, são reais — medidas entre 9 e 13 A. Ou seja:
-`V × I` **não serve** para calcular a potência solar deste modelo.
+Este inversor tem **dois MPPTs** e o firmware não implementa `QPIGS2` (responde `NAK`).
+Os campos 12/13 do `QPIGS` estão corretos, mas descrevem **apenas a entrada 1**.
 
-Sete amostras consecutivas, com sol (30/10 09:26):
+Confirmado confrontando a leitura local com a nuvem do fabricante **no mesmo minuto**
+(30/10, 09:50):
 
-```
-[5] saída  [9] carga  [12] iPv  [13] Vpv
-   0310        009      00.0      045.2
-   0329        009      00.0      038.9
-   0289        009      00.0      039.5
-   0319        010      00.0      044.4
-   0362        011      00.0      042.9
-   0306        011      00.0      041.8
-   0294        013      00.0      040.8
-```
+| Fonte | PV1 | PV2 | Total |
+| --- | --- | --- | --- |
+| `QPIGS` local (campos 13/12) | 47,3 V / `00.0` A → 0 W | não exposto | — |
+| App do fabricante | 47,3 V / **0 W** | **256,4 V / 512 W** | **512 W** |
 
-`QPIGS2` (segundo MPPT) responde **NAK**, e os campos 17–20 (`00 00 00000 010`) não
-variam — não há potência PV em outro lugar da resposta.
-
-**Solução adotada:** quando a corrente PV não é informada, o `pv.power` fica `null` (nunca
-um falso `0 W`) e o coletor publica `pv.power_estimated` pelo **balanço de energia**:
+O `.106` está com **um MPPT sem painéis** (o PV1), e é justamente o que o `QPIGS` mostra.
+A geração real (PV2, ~256 V) não sai por nenhum comando PI30 aceito por esta unidade:
 
 ```
-PV ≈ potência_ativa_de_saída + (corrente_de_carga − corrente_de_descarga) × tensão_da_bateria
+QPIGS2  -> NAK      QPGS0 -> NAK     QET  -> NAK     QBE -> NAK
+QPIGS3  -> NAK      QPGS1 -> NAK     QLT  -> NAK     QPIZ -> NAK
 ```
 
-Sem rede elétrica, tudo o que a carga consome e a bateria recebe veio do PV, então a
-igualdade fecha. Validação cruzada no `.59`, que **mede** as duas coisas:
+Nenhum campo sobrando da resposta carrega o PV2: 17–20 (`00 00 00000 010`) são constantes
+e o dongle **não** envia telemetria espontânea (0 bytes em 25 s de escuta).
 
-| Inversor | PV medido | saída + carga − descarga |
-| --- | --- | --- |
-| `.59` | 1442 W | 115 + 25,2 × 52,7 = **1443 W** |
-| `.106` | (não informado) | 312 + 10 × 52,9 = **841 W** |
+**O que o projeto faz com isso:**
 
-O painel mostra o valor estimado com `≈` e explica a fórmula no tooltip, para nunca
-confundir estimativa com medição.
+- publica `pv.mppt = 1`, `pv.mppt_count = 2` e `pv.mppt_unreadable = [2]`;
+- `pv.voltage`, `pv.current` e `pv.power` são **do MPPT1** — verdadeiros, mas não são a
+  geração total;
+- publica `pv.dc_balance` = saída + (carga − descarga) × tensão da bateria, que é uma
+  grandeza **medida** no lado DC (diagnóstico, **não** é a potência de entrada PV);
+- o painel mostra `0 W` com a explicação "apenas o MPPT1 é exposto" e o balanço DC
+  abaixo, para o usuário comparar com o display.
+
+> Por que não publicar o balanço como "geração": com os números da nuvem acima o balanço
+> dá 573 W (415 W de saída + 158 W de carga) contra 512 W de PV real — ou seja, ele
+> **superestima** por causa das perdas de conversão mal contabilizadas. Um número errado
+> com aparência de medido é pior do que um traço honesto.
 
 ## 5. Modbus RTU — mapa A (EG4 3000EHV)
 

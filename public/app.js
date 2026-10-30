@@ -28,6 +28,15 @@ const MODE_LABELS = {
   Off: 'Desligado',
 };
 
+const MODE_HINTS = {
+  'Off-Grid': 'Modo informado pelo próprio inversor: operando fora da rede da distribuidora.',
+  Battery: 'Modo informado pelo próprio inversor: consumindo da bateria.',
+  Line: 'Modo informado pelo próprio inversor: sincronizado à rede da distribuidora.',
+  Grid: 'Modo informado pelo próprio inversor: sincronizado à rede da distribuidora.',
+  Fault: 'O inversor está reportando falha.',
+  Off: 'O inversor está desligado.',
+};
+
 const PROTOCOL_LABELS = {
   modbus_a: 'Modbus A',
   modbus_b: 'Modbus B',
@@ -169,29 +178,38 @@ function renderSummary(dashboard) {
       online < dashboard.devices.length
         ? `Média dos ${online} inversores que responderam agora`
         : 'Média do estado de carga das baterias'),
-    summaryCard('Geração solar', formatW(solar.value),
-      solar.excluded
-        ? `Soma apenas dos inversores que medem a corrente PV — ${solar.excluded} não informa(m) esse dado`
-        : 'Soma da potência fotovoltaica agora'),
+    summaryCard('Geração solar', formatW(solar.value), solarHintText(solar)),
     summaryCard('Potência de saída', formatW(output), 'Soma da potência entregue às cargas'),
   ].join('');
 }
 
-/** Soma somente o PV medido: estimativa nao entra como geracao. */
+/**
+ * Soma o PV medido de todas as entradas que os inversores expõem. Inversor que
+ * esconde uma entrada (multi-MPPT sem `QPIGS2`) deixa o total como piso.
+ */
 function solarTotal(devices) {
   let measured = 0;
   let any = false;
-  let excluded = 0;
+  let partial = 0;
+  let unmeasured = 0;
   for (const device of devices) {
     if (!device.online) continue;
     if (Number.isFinite(device.pv.power)) {
       measured += device.pv.power;
       any = true;
     } else {
-      excluded += 1;
+      unmeasured += 1;
     }
+    if (device.pv.mpptUnreadable.length) partial += 1;
   }
-  return { value: any ? measured : null, excluded };
+  return { value: any ? measured : null, partial, unmeasured };
+}
+
+function solarHintText(solar) {
+  if (solar.partial === 1) return 'Soma parcial: 1 inversor não expõe todas as entradas PV, só o MPPT1 é lido';
+  if (solar.partial > 1) return `Soma parcial: ${solar.partial} inversores não expõem todas as entradas PV`;
+  if (solar.unmeasured) return `Soma apenas dos inversores que medem a corrente PV — ${solar.unmeasured} não informa(m) esse dado`;
+  return 'Soma da potência fotovoltaica agora';
 }
 
 function formatPower(value) {
@@ -207,7 +225,8 @@ function renderDevices(devices) {
     const soc = Number.isFinite(device.soc) ? device.soc : null;
     const level = soc == null ? '' : soc < 30 ? ' low' : soc < 60 ? ' mid' : '';
     const chips = [device.online
-      ? chip('muted', device.mode ? (MODE_LABELS[device.mode] ?? device.mode) : 'Modo não informado')
+      ? chip('muted', device.mode ? (MODE_LABELS[device.mode] ?? device.mode) : 'Modo não informado',
+        device.mode ? (MODE_HINTS[device.mode] ?? `Modo informado pelo inversor: ${device.mode}.`) : 'O inversor não informou o modo de operação.')
       : chip('danger', 'Sem resposta')];
     if (soc != null && soc < 30) chips.push(chip('warn', 'Bateria baixa'));
 
@@ -261,22 +280,23 @@ function formatAmps(value) {
 
 /** Mostra a conta quando a potência solar nao foi medida, para dar como conferir. */
 function balanceLine(device) {
-  if (Number.isFinite(device.pv.power)) return '';
-  if (!Number.isFinite(device.pv.powerEstimated)) return '';
-  const out = Number.isFinite(device.output.activePower) ? Math.round(device.output.activePower) : 0;
-  const charging = Number.isFinite(device.battery.chargePower) ? Math.round(device.battery.chargePower) : 0;
-  const discharging = Number.isFinite(device.battery.dischargePower) ? Math.round(device.battery.dischargePower) : 0;
-  const total = Math.round(device.pv.powerEstimated);
-  const formula = discharging
-    ? `${out} + ${charging} − ${discharging} = ${total} W`
-    : `${out} + ${charging} = ${total} W`;
-  return `<p class="device-diag" title="O inversor não informa a corrente PV; este é o balanço de potência no lado DC">Balanço útil: ${escapeHtml(formula)}</p>`;
+  if (!Number.isFinite(device.pv.dcBalance)) return '';
+  if (device.pv.mpptCount > 1) {
+    const missing = device.pv.mpptUnreadable.length
+      ? `MPPT${device.pv.mpptUnreadable.join(', MPPT')}`
+      : 'o outro MPPT';
+    return `<p class="device-diag" title="O inversor só expõe o MPPT1; QPIGS2 responde NAK">${escapeHtml(missing)} não é exposto por este inversor · balanço DC: ${escapeHtml(formatW(device.pv.dcBalance))}</p>`;
+  }
+  return '';
 }
 
 function solarHint(device) {
   if (!device.online) return null;
+  if (device.pv.mpptCount > 1 && device.pv.mppt) {
+    return `Apenas o MPPT${device.pv.mppt} é exposto por este inversor; a geração pode estar no outro MPPT`;
+  }
   if (Number.isFinite(device.pv.power)) return 'Potência medida (tensão × corrente PV)';
-  return 'O inversor não informa a corrente PV, então a geração não pode ser medida. Veja o balanço útil abaixo';
+  return 'O inversor não informa a corrente PV';
 }
 
 function offlineReason(device) {

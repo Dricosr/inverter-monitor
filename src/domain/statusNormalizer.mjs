@@ -57,10 +57,13 @@ export class StatusNormalizer {
           temperature: this.#finite(battery.temperature, this.#finite(this.#object(device.temperature).battery, null)),
         },
         pv: {
+          mppt: this.#finite(pv.mppt, null),
+          mpptCount: this.#finite(pv.mppt_count, null),
+          mpptUnreadable: Array.isArray(pv.mppt_unreadable) ? pv.mppt_unreadable : [],
           voltage: this.#finite(pv.voltage, null),
           current: this.#finite(pv.current, null),
           power: this.#finite(pv.power, null),
-          powerEstimated: this.#finite(pv.power_estimated, null),
+          dcBalance: this.#finite(pv.dc_balance, null),
         },
         grid: {
           voltage: this.#finite(grid.voltage, null),

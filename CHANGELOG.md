@@ -3,16 +3,44 @@
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 e versionamento [SemVer](https://semver.org/lang/pt-BR/).
 
+## [1.1.2] — 2026-10-31
+
+### Corrigido
+
+- **A geração do `.106` não estava errada, o rótulo estava.** Comparando o painel com o
+  app do fabricante no mesmo minuto, o `QPIGS` desse modelo reporta **apenas o MPPT1**
+  (47 V, sem painéis, 0 W) enquanto a geração real está no **MPPT2** (~256 V, 512 W) — e
+  o firmware responde **NAK** ao `QPIGS2`, então a segunda entrada não é legível por
+  PI30. O parser agora publica `pv.mppt = 1`, `pv.mppt_count = 2` e
+  `pv.mppt_unreadable = [2]`; o card mostra `0 W` com o aviso "apenas o MPPT1 é exposto"
+  em vez de sugerir que o inversor não gera.
+- **A estimativa por balanço de energia foi removida.** Com os números da nuvem, o
+  cálculo dava 573 W contra 512 W reais (9% acima), porque a carga da bateria entra na
+  conta mas não sai toda como potência. O balanço continua disponível como diagnóstico
+  (`pv.dc_balance`), nunca como geração.
+- `pv.power` passou a ser sempre medido. Ausência de corrente PV não vira mais um número
+  inventado.
+
+### Adicionado
+
+- Card do inversor com 8 métricas para diagnóstico: potência de saída, geração solar,
+  carga no inversor, temperatura, tensão da bateria, corrente de carga, corrente de
+  descarga e tensão PV.
+- `battery.charge_current`, `battery.discharge_current`, `battery.charge_power` e
+  `battery.discharge_power` no payload (campos 10 e 11 do `QPIGS`).
+- Linha de balanço DC no card quando a geração não é medida, para comparar com o display.
+- Seção "O `QPIGS` do `.106` só traz o MPPT1" em [docs/PROTOCOL.md](docs/PROTOCOL.md)
+  com a tabela local × nuvem e as respostas NAK registradas.
+- 6 testes cobrindo o schema MPPT e o balanço.
+
 ## [1.1.1] — 2026-10-30
 
 ### Corrigido
 
 - **`.106` mostrava `0 W` de geração com o inversor gerando.** O `QPIGS` desse modelo
   deixa o campo de corrente PV (12) travado em `00.0`, então `V × I` dava zero. Agora
-  `pv.power` fica `null` (não um falso zero) e o coletor publica `pv.power_estimated`
-  pelo balanço de energia (saída + carga − descarga); o painel exibe `≈ W` com a
-  fórmula no tooltip. Validado no `.59`, que mede as duas grandezas: PV 1442 W contra
-  1443 W do balanço.
+  `pv.power` fica `null` (não um falso zero). *(Substituído em 1.1.2: o `0 W` é real —
+  o `QPIGS` só lê o MPPT1, que está sem painéis.)*
 - **Campos ausentes viravam zero no painel.** `Number(null) === 0` fazia `pv.power`,
   `grid.voltage` e `output.current` aparecerem como `0` quando o coletor informava
   `null`. Agora ausente continua ausente e o card mostra `—`.
