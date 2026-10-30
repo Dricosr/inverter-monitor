@@ -708,6 +708,23 @@ As tarefas aparecem como `InverterMonitorCollector` e `InverterMonitorUI`; os sc
 liberam as portas 8080 e 3071 no firewall e encerram a instância anterior antes de subir
 a nova, para não deixar processo órfão segurando a porta.
 
+> **Por que não aparece janela:** as três tarefas rodam com
+> `-Principal … -LogonType S4U -RunLevel Highest`, ou seja, na **sessão 0**
+> (não interativa). `-WindowStyle Hidden` **não basta**: um processo de console iniciado
+> em sessão interativa abre a janela do `conhost` de qualquer jeito, e a janela do
+> `pwsh.exe` fica visível. Se precisar re-registrar uma tarefa, **passe o `-Principal`** —
+> sem ele o Agendador assume `Interactive` e a janela volta.
+
+```powershell
+# conferir em que sessão cada processo está (0 = invisível)
+Get-CimInstance Win32_Process -Filter "Name='pwsh.exe' OR Name='python.exe' OR Name='node.exe'" |
+  Where-Object { $_.CommandLine -match 'inverter|server\.mjs|watchdog' } |
+  ForEach-Object { "{0} sessao={1}" -f $_.ProcessId, (Get-Process -Id $_.ProcessId).SessionId }
+
+Get-ScheduledTask -TaskName 'InverterMonitor*' |
+  Select-Object TaskName, @{n='LogonType';e={$_.Principal.LogonType}}
+```
+
 ```powershell
 Start-ScheduledTask -TaskName InverterMonitorCollector   # reiniciar após mudança de código
 Get-ScheduledTaskInfo -TaskName InverterMonitorCollector | Select-Object LastRunTime, LastTaskResult
@@ -827,6 +844,7 @@ executores falsos, sem tocar no Gate, no SSH ou no XMRig.
 | Valor em cinza com `sem atualização há N s` | O campo não veio neste ciclo e está sendo reaproveitado | Esperado — é o último valor válido; a próxima leitura boa volta a deixá-lo branco |
 | Nota com idade grande que não diminui | O campo não volta a ser lido (registrador instável) | Veja `cache.fields` em `/status`; a idade é contada desde a última leitura real daquele campo |
 | Regra em `Bloqueada` | O host da ação foi desligado por outra regra | Esperado — volta a agir quando o host religar |
+| **Janela do `pwsh.exe` visível** | A tarefa foi registrada como `Interactive` (sessão 1); `-WindowStyle Hidden` não resolve | Re-registre com `-Principal … -LogonType S4U` (ou rode `deploy\install-collector.ps1` de novo) |
 | Diálogo não fecha ao clicar `Cancelar` | Corrigido na 1.4.1 (era `submit`, barrado pela validação) | Recarregue com `Ctrl+F5` para pegar o `app.js` novo |
 | `bloco 277+29 veio truncado` | O dongle devolveu menos registradores que o pedido | Passageiro na maioria dos casos; a leitura é repetida e, se persistir, o card mostra o último valor em cinza |
 | Tempo desde a leitura parecia dobrar | Era o carimbo do início do ciclo | Corrigido na 1.3.1: o `timestamp` marca o fim do ciclo |

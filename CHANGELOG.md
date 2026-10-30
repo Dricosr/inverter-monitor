@@ -20,6 +20,24 @@ e versionamento [SemVer](https://semver.org/lang/pt-BR/).
 - **Liberação antes da aplicação no mesmo ciclo**: ao religar o host, as regras
   dependentes já podem agir no mesmo tick (antes perdiam um ciclo).
 
+## [1.4.3] — 2026-10-31
+
+### Corrigido
+
+- **A janela do `pwsh.exe` ficava visível.** As tarefas `InverterMonitorCollector` e
+  `InverterMonitorWatchdog` estavam registradas com `LogonType = Interactive`: o processo
+  de console roda na sessão do usuário e o `conhost` abre a janela, mesmo com
+  `-WindowStyle Hidden`. As três tarefas voltaram a rodar com
+  `-Principal -LogonType S4U -RunLevel Highest` (sessão 0, não interativa) — foi uma
+  re-registração manual sem `-Principal` que introduziu o problema.
+- O vigia agora avisa no `data/watchdog.log` quando detecta que está rodando em sessão
+  interativa, para o motivo não virar mistério outra vez.
+
+### Documentado
+
+- README: seção explicando **por que `-WindowStyle Hidden` não basta** e como conferir a
+  sessão dos processos e o `LogonType` das tarefas; nova linha na solução de problemas.
+
 ## [1.4.2] — 2026-10-31
 
 ### Alterado

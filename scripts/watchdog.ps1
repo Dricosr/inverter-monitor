@@ -34,6 +34,21 @@ function Test-CollectorListening {
 }
 
 try {
+    # Tarefa registrada como "Interactive" roda na sessao do usuario e a janela do
+    # console aparece na tela; com LogonType S4U ela roda na sessao 0 e nao aparece.
+    # Avisar uma vez evita a duvida de "quem abriu essa janela do pwsh".
+    $session = [System.Diagnostics.Process]::GetCurrentProcess().SessionId
+    if ($session -ne 0) {
+        $tail = @()
+        if (Test-Path -LiteralPath $logFile) {
+            $tail = Get-Content -LiteralPath $logFile -Tail 30 -ErrorAction SilentlyContinue
+        }
+        if (-not ($tail | Where-Object { $_ -like '*janela do console*' })) {
+            Write-Log ("tarefa na sessao $session (interativa): a janela do console do pwsh fica visivel. " +
+                "Re-registre com -Principal -LogonType S4U para ela desaparecer") 'WARN'
+        }
+    }
+
     $age = Get-SnapshotAgeSeconds
     $listening = Test-CollectorListening
 

@@ -57,7 +57,7 @@ DONGLE_UDP_PORT = 58899
 LOCAL_TCP_PORT = 8899  # porta em que o dongle conecta de volta (fixa no firmware)
 CLOUD_RECOVERY_DELAY = 1.5
 
-__version__ = "1.4.2"
+__version__ = "1.4.3"
 
 log = logging.getLogger("inverter")
 
