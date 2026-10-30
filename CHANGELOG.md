@@ -3,6 +3,23 @@
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 e versionamento [SemVer](https://semver.org/lang/pt-BR/).
 
+## [1.4.1] — 2026-10-31
+
+### Corrigido
+
+- **O botão `Cancelar` não fechava os diálogos.** Ele era um `button` sem `type`, logo um
+  `submit`; como o formulário tem campos `required` vazios, a validação barrava o submit e
+  o `method="dialog"` nunca fechava — a janela só saía com `Esc`. Agora `Cancelar` é
+  `type="button"` e fecha explicitamente (regra **e** renomear inversor).
+- **Regra bloqueada não é regra com falha.** Com o ai-node desligado de propósito pela
+  regra de energia, `gate_pause` e `ainode_mining_reduce` tentavam SSH/HTTP e a tela
+  mostrava `Falha` + `2 ações falharam`. O host agora é rastreado
+  (`state.hosts`): as ações que dependem dele ficam `Bloqueada · ai-node desligado pela
+  regra "..."`, sem tentativa e sem vermelho. O Gate entra como dependente do ai-node
+  automaticamente quando `GATE_BASE_URL` aponta para `AINODE_ADDRESS`.
+- **Liberação antes da aplicação no mesmo ciclo**: ao religar o host, as regras
+  dependentes já podem agir no mesmo tick (antes perdiam um ciclo).
+
 ## [1.4.0] — 2026-10-31
 
 ### Adicionado

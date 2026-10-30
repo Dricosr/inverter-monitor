@@ -30,7 +30,7 @@ class FakeExecutor {
   }
 }
 
-async function buildService({ rules, devices, state, executors, now, errorBackoffSeconds }) {
+async function buildService({ rules, devices, state, executors, now, errorBackoffSeconds, actionHosts }) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'automation-test-'));
   const stateFile = path.join(directory, 'state.json');
   if (state) await writeFile(stateFile, JSON.stringify(state), 'utf8');
@@ -40,6 +40,7 @@ async function buildService({ rules, devices, state, executors, now, errorBackof
     enabled: true,
     stateFile,
     executors,
+    actionHosts,
     rulesProvider: async () => currentRules,
     deviceProvider: async () => currentDevices,
     now: now ?? (() => Date.now()),
@@ -454,5 +455,89 @@ test('confirmSeconds ausente mantem o comportamento imediato', async () => {
   });
   await service.tick();
   assert.equal(gate.calls.length, 1);
+});
+
+
+// --- Host desligado: as regras dependentes ficam bloqueadas, nao em falha ---------
+
+function powerRule(overrides = {}) {
+  return {
+    id: 'r-power', enabled: true, action: 'ainode_power_off',
+    sourceDeviceId: 'dev-a', activateBelow: 40, resumeAbove: 50, confirmSeconds: 0, ...overrides,
+  };
+}
+
+function miningRule(overrides = {}) {
+  return {
+    id: 'r-mining', enabled: true, action: 'ainode_mining_reduce',
+    sourceDeviceId: 'dev-a', activateBelow: 40, resumeAbove: 50, desiredIntensity: 10, ...overrides,
+  };
+}
+
+test('regra de outro host fica bloqueada, nao em falha, com o host desligado', async () => {
+  const power = new FakeExecutor();
+  const mining = new FakeExecutor();
+  const { service, setRules } = await buildService({
+    rules: [powerRule()],
+    devices: deviceWith(35),
+    executors: { ainode_power_off: power, ainode_mining_reduce: mining },
+    actionHosts: { ainode_power_off: 'ai-node', ainode_mining_reduce: 'ai-node' },
+  });
+
+  await service.tick();
+  assert.equal(power.calls.at(-1).target, 'active', 'desligou');
+
+  // A mesma inversora de referencia passa a pedir a reducao de mineracao.
+  setRules([powerRule(), miningRule()]);
+  await service.tick();
+
+  assert.equal(mining.calls.length, 0, 'nao tenta SSH numa maquina desligada');
+  const status = await service.getStatus();
+  assert.equal(status['r-mining'].outcome, 'bloqueada');
+  assert.match(status['r-mining'].detail.detail, /ai-node desligado pela regra/);
+  assert.doesNotMatch(status['r-mining'].detail.detail, /falhou/);
+});
+
+test('host volta a valer quando a acao de energia e liberada', async () => {
+  const power = new FakeExecutor();
+  const mining = new FakeExecutor();
+  const { service, setRules, setDevices } = await buildService({
+    rules: [powerRule()],
+    devices: deviceWith(35),
+    executors: { ainode_power_off: power, ainode_mining_reduce: mining },
+    actionHosts: { ainode_power_off: 'ai-node', ainode_mining_reduce: 'ai-node' },
+  });
+
+  await service.tick();
+  assert.equal((await service.getStatus())['r-power'].applied, true);
+
+  setRules([powerRule(), miningRule()]);
+  await service.tick();
+  assert.equal((await service.getStatus())['r-mining'].outcome, 'bloqueada', 'ainda desligado');
+
+  // Desabilitar a regra de energia religa o host (liberacao) e destrava a mineracao.
+  setRules([powerRule({ enabled: false }), miningRule()]);
+  setDevices(deviceWith(35));
+  await service.tick();
+
+  const status = await service.getStatus();
+  assert.equal(status['r-power'].outcome, 'liberada');
+  assert.notEqual(status['r-mining'].outcome, 'bloqueada', 'host religado, mineracao volta a agir');
+});
+
+test('sem actionHosts nada muda (comportamento anterior)', async () => {
+  const power = new FakeExecutor();
+  const mining = new FakeExecutor();
+  const { service, setRules } = await buildService({
+    rules: [powerRule()],
+    devices: deviceWith(35),
+    executors: { ainode_power_off: power, ainode_mining_reduce: mining },
+  });
+
+  await service.tick();
+  setRules([powerRule(), miningRule()]);
+  await service.tick();
+
+  assert.equal(mining.calls.length, 1, 'sem host configurado, a regra executa normalmente');
 });
 

@@ -84,8 +84,8 @@
       <label>ID na sonda<input id="device-id" name="id" readonly></label>
       <label>Nome no painel<input id="device-name" name="displayName" maxlength="80" required></label>
       <div class="dialog-actions">
-        <button class="button secondary" value="cancel">Cancelar</button>
-        <button class="button primary" id="device-save" value="default">Salvar nome</button>
+        <button type="button" class="button secondary" data-close-dialog="device-dialog">Cancelar</button>
+        <button type="submit" class="button primary" id="device-save">Salvar nome</button>
       </div>
     </form>
   </dialog>
@@ -118,8 +118,8 @@
       <p id="rule-error" class="field-error" role="alert"></p>
       <label class="checkbox"><input id="rule-enabled" type="checkbox"> Regra ativa</label>
       <div class="dialog-actions">
-        <button class="button secondary" value="cancel">Cancelar</button>
-        <button class="button primary" id="rule-save" value="default">Salvar regra</button>
+        <button type="button" class="button secondary" data-close-dialog="rule-dialog">Cancelar</button>
+        <button type="submit" class="button primary" id="rule-save">Salvar regra</button>
       </div>
     </form>
   </dialog>

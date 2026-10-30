@@ -29,6 +29,7 @@ export class AutomationService {
     aiNode = {},
     snapshotStaleAfterSeconds = 120,
     errorBackoffSeconds = 120,
+    actionHosts = {},
     executors,
     rulesProvider,
     deviceProvider,
@@ -42,6 +43,8 @@ export class AutomationService {
     this.pollMs = pollMs;
     this.snapshotStaleAfterSeconds = snapshotStaleAfterSeconds;
     this.errorBackoffSeconds = errorBackoffSeconds;
+    this.actionHosts = actionHosts;
+    this.hosts = {};
     this.now = now;
     this.normalizer = new StatusNormalizer();
     this.stateStore = new JsonStore(stateFile, { actions: {}, updatedAt: null });
@@ -84,11 +87,13 @@ export class AutomationService {
     try {
       await this.#hydrate();
       const [devices, rules] = await Promise.all([this.deviceProvider(), this.rulesProvider()]);
+      // Libera primeiro o que ficou orfao: se a regra de energia religou o host neste
+      // ciclo, as regras dependentes ja podem agir no mesmo tick.
+      await this.#releaseOrphans(rules);
       for (const rule of rules) {
         if (!rule.enabled) continue;
         await this.#applyRule(rule, devices);
       }
-      await this.#releaseOrphans(rules);
       await this.#saveStatus();
     } catch (error) {
       console.error('[automation] ciclo falhou:', error.message);
@@ -101,6 +106,9 @@ export class AutomationService {
     if (this.hydrated) return;
     const stored = await this.stateStore.read();
     this.status = stored.actions ?? {};
+    // Host desligado por nos continua desligado depois de um restart: sem isso as
+    // regras que dependem dele voltariam a tentar e a encher a tela de "Falha".
+    this.hosts = stored.hosts ?? {};
     this.hydrated = true;
   }
 
@@ -176,6 +184,27 @@ export class AutomationService {
       });
     }
 
+    // Host desligado por outra regra: nao e falha, e consequencia. Tentar de novo
+    // gastaria SSH/HTTP para nada e pintaria a tela de vermelho com a maquina
+    // desligada de proposito.
+    const host = this.actionHosts[rule.action];
+    if (host && rule.action !== 'ainode_power_off' && this.hosts[host]?.down) {
+      const by = this.hosts[host].byName ?? this.hosts[host].byRule ?? 'outra regra';
+      return this.#record(rule, {
+        mode: previous.mode ?? 'indeterminado',
+        soc,
+        pending: null,
+        action: {
+          changed: false,
+          applied: previous.applied === true,
+          owned: previous.owned === true,
+          pausedAt: previous.pausedAt ?? null,
+          detail: `${host} desligado pela regra "${by}"`,
+        },
+        outcome: 'bloqueada',
+      });
+    }
+
     // Falhou antes? Espera o backoff em vez de martelar o alvo a cada ciclo.
     const backoff = this.#backoffRemaining(previous);
     if (backoff > 0) {
@@ -197,6 +226,7 @@ export class AutomationService {
 
     try {
       const action = await executor.apply(target, rule.desiredIntensity, { previous });
+      this.#trackHost(rule, host, action);
       this.#record(rule, {
         mode: target,
         soc,
@@ -239,6 +269,21 @@ export class AutomationService {
     return { soc, reason: null };
   }
 
+  /**
+   * Marca/limpa o host que a acao de energia acabou de desligar.
+   *
+   * `applied` do executor de energia significa "desligado": e o que permite as outras
+   * regras do mesmo host saberem que nao adianta tentar.
+   */
+  #trackHost(rule, host, action) {
+    if (!host || rule.action !== 'ainode_power_off') return;
+    if (action?.applied === true) {
+      this.hosts[host] = { down: true, byRule: rule.id, byName: rule.name ?? rule.id };
+    } else {
+      delete this.hosts[host];
+    }
+  }
+
   #backoffRemaining(record) {
     if (!record?.failedAt || !this.errorBackoffSeconds) return 0;
     const failedAt = Date.parse(record.failedAt);
@@ -263,6 +308,8 @@ export class AutomationService {
     if (!executor) return;
     try {
       const action = await executor.apply('inactive', rule?.desiredIntensity ?? null, { previous: record });
+      // Liberar a acao de energia religa o host: as regras dependentes voltam a valer.
+      this.#trackHost(record, this.actionHosts[record.action], action);
       record.mode = 'inactive';
       record.soc = null;
       record.applied = false;
@@ -329,6 +376,7 @@ export class AutomationService {
   async #saveStatus() {
     await this.stateStore.write({
       actions: this.status,
+      hosts: this.hosts,
       updatedAt: new Date().toISOString(),
     });
   }

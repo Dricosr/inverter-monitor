@@ -21,7 +21,25 @@ const automationService = createAutomationService({
   ep2BaseThreads: config.ep2MiningBaseThreads,
   aiNode: config.aiNode,
   snapshotStaleAfterSeconds: config.snapshotStaleAfterSeconds,
+  // O Gate roda no proprio ai-node: se ele foi desligado, pausar a fila nao tem como
+  // funcionar — melhor mostrar "bloqueada" do que "falha".
+  actionHosts: buildActionHosts(config),
 });
+
+function buildActionHosts(config) {
+  const hosts = {
+    ainode_power_off: config.aiNode.host,
+    ainode_mining_reduce: config.aiNode.host,
+  };
+  try {
+    if (new URL(config.gateUrl).hostname === config.aiNode.address) {
+      hosts.gate_pause = config.aiNode.host;
+    }
+  } catch {
+    // Gate URL invalida: fica sem host associado, como antes.
+  }
+  return hosts;
+}
 
 const dashboardService = new DashboardService({
   devicesFile: config.devicesFile,

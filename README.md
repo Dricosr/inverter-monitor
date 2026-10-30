@@ -352,6 +352,7 @@ O executor roda a cada 10 s (`DASHBOARD_POLL_MS`) e segue sempre o mesmo contrat
 | SOC entre os dois limites | mantém o último alvo (histerese), sem alternar |
 | SOC acima de `resumeAbove` | libera (retoma/restaura o máximo/religa) |
 | SOC indisponível, **do cache** ou de snapshot velho | não mexe em nada, cancela a confirmação e mantém o estado aplicado |
+| host desligado por outra regra (ex.: ai-node) | fica `Bloqueada` — consequência, não falha: nada é tentado e o chip não conta como erro |
 | regra desabilitada ou excluída | libera o recurso que ela havia aplicado |
 | ação já está no estado desejado | não repete o comando (idempotente) |
 | o comando falhou | registra `Falha` naquela regra, com backoff, sem interromper as outras |
@@ -818,6 +819,8 @@ executores falsos, sem tocar no Gate, no SSH ou no XMRig.
 | `.106` marcado `offline` sem motivo | NAK ou resposta vazia no ASCII eram tratados como falha | Corrigido na 1.3.2: NAK/vazio são repetidos e o 0925 sozinho mantém o inversor online |
 | Valor em cinza com `sem atualização há N s` | O campo não veio neste ciclo e está sendo reaproveitado | Esperado — é o último valor válido; a próxima leitura boa volta a deixá-lo branco |
 | Nota com idade grande que não diminui | O campo não volta a ser lido (registrador instável) | Veja `cache.fields` em `/status`; a idade é contada desde a última leitura real daquele campo |
+| Regra em `Bloqueada` | O host da ação foi desligado por outra regra | Esperado — volta a agir quando o host religar |
+| Diálogo não fecha ao clicar `Cancelar` | Corrigido na 1.4.1 (era `submit`, barrado pela validação) | Recarregue com `Ctrl+F5` para pegar o `app.js` novo |
 | `bloco 277+29 veio truncado` | O dongle devolveu menos registradores que o pedido | Passageiro na maioria dos casos; a leitura é repetida e, se persistir, o card mostra o último valor em cinza |
 | Tempo desde a leitura parecia dobrar | Era o carimbo do início do ciclo | Corrigido na 1.3.1: o `timestamp` marca o fim do ciclo |
 | Temperatura `—` | Modelo não expõe aquele sensor | Esperado; o tooltip da métrica explica |

@@ -81,6 +81,15 @@ document.querySelector('#rule-action').addEventListener('change', syncRuleDialog
 document.querySelector('#rule-activate').addEventListener('input', syncRuleDialog);
 document.querySelector('#rule-resume').addEventListener('input', syncRuleDialog);
 
+// `Cancelar` precisa fechar sempre. Enquanto ele era um submit do formulario, a
+// validacao dos campos `required` barrava o submit e o dialogo ficava aberto — o
+// unico jeito de sair era o Esc.
+document.querySelectorAll('[data-close-dialog]').forEach((button) => {
+  button.addEventListener('click', () => {
+    document.getElementById(button.dataset.closeDialog)?.close();
+  });
+});
+
 async function api(path, options = {}) {
   const response = await fetch(path, {
     ...options,
@@ -640,6 +649,15 @@ function ruleState(rule, execution, source) {
       title,
     };
   }
+  // Host desligado por outra regra: consequencia, nao falha.
+  if (execution?.outcome === 'bloqueada') {
+    return {
+      tone: 'muted',
+      label: 'Bloqueada',
+      note: detail || 'host desligado por outra regra',
+      title,
+    };
+  }
   // Inversor de referencia fora do ar: sem SOC nao se decide nada, e o estado atual
   // e mantido de proposito (nao libera nem intensifica as cegas).
   if (source && source.online === false) {
@@ -765,7 +783,6 @@ function openDevice(id) {
 }
 
 async function saveDevice(event) {
-  if (event.submitter?.value === 'cancel') return;
   event.preventDefault();
   try {
     await api(`/api/devices/${encodeURIComponent(document.querySelector('#device-id').value)}`, {
@@ -837,7 +854,6 @@ function syncRuleDialog() {
 }
 
 async function saveRule(event) {
-  if (event.submitter?.value === 'cancel') return;
   event.preventDefault();
 
   const id = document.querySelector('#rule-id').value;
