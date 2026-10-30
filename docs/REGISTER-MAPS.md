@@ -343,7 +343,7 @@ O método que funcionou, na ordem em que vale a pena tentar:
 | Sintoma | Causa provável |
 | --- | --- |
 | `(NAKss` no PI30 | CRC com init `0xFFFF`; ou comando não suportado pelo firmware |
-| `(NAKss` intermitente no `QPIGS` | Dongle atendendo nuvem e inversor juntos: repita |
+| `(NAKss` intermitente no `QPIGS` | Dongle atendendo nuvem e inversor juntos: repita. A checagem tem que ser no **conteúdo** — a resposta chega como sucesso no transporte |
 | Timeout em todos os slaves | Endereço errado (teste 4501+ no mapa 0925) ou dongle já conectado a outro cliente |
 | Timeout só em alguns registradores | Leitura curta ou fora de alinhamento |
 | Valores absurdos com resposta válida | Bytes trocados (mapa 0925) ou escala errada |
