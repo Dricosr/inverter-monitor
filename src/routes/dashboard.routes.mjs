@@ -15,6 +15,14 @@ export function createDashboardRouter(service) {
     }
   });
 
+  router.post('/refresh', async (request, response, next) => {
+    try {
+      response.json(await service.refresh());
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.put('/devices/:id', async (request, response, next) => {
     try {
       const displayName = String(request.body?.displayName ?? '').trim().slice(0, 80);

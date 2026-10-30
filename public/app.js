@@ -67,7 +67,7 @@ document.querySelectorAll('.nav-item').forEach((button) => {
   });
 });
 
-document.querySelector('#refresh-button').addEventListener('click', loadDashboard);
+document.querySelector('#refresh-button').addEventListener('click', () => loadDashboard({ refresh: true }));
 document.querySelector('#new-rule-button').addEventListener('click', () => openRule());
 document.querySelector('#device-form').addEventListener('submit', saveDevice);
 document.querySelector('#rule-form').addEventListener('submit', saveRule);
@@ -87,16 +87,24 @@ async function api(path, options = {}) {
   return response.status === 204 ? null : response.json();
 }
 
-async function loadDashboard() {
+async function loadDashboard(options = {}) {
   const button = document.querySelector('#refresh-button');
+  // Uma requisicao por vez: o coletor fala com um dongle por dongle, e duas
+  // atualizacoes simultaneas so fariam a segunda esperar a primeira.
+  if (button.disabled) return;
+  const rotulo = button.textContent;
   button.disabled = true;
+  if (options.refresh) button.textContent = 'Atualizando…';
   try {
-    state.dashboard = await api('/api/dashboard');
+    state.dashboard = options.refresh
+      ? await api('/api/refresh', { method: 'POST' })
+      : await api('/api/dashboard');
     render();
   } catch (error) {
     showToast(error.message);
   } finally {
     button.disabled = false;
+    button.textContent = rotulo;
   }
 }
 

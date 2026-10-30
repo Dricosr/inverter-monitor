@@ -6,10 +6,13 @@ import { createIntegrationStatusService } from './integrationStatus.service.mjs'
 import { parseJsonSafe } from '../domain/jsonSafe.mjs';
 
 export class DashboardService {
-  constructor({ devicesFile, snapshotFile, collectorUrl, dashboardFile, gateUrl, ep2XmrigUrl, ep2XmrigConfig, ep2XmrigToken, ep2BaseThreads = null, automationEnabled = false, automationService = null }) {
+  constructor({ devicesFile, snapshotFile, collectorUrl, collectorRefreshUrl, dashboardFile, gateUrl, ep2XmrigUrl, ep2XmrigConfig, ep2XmrigToken, ep2BaseThreads = null, automationEnabled = false, automationService = null }) {
     this.devicesFile = devicesFile;
     this.snapshotFile = snapshotFile;
     this.collectorUrl = collectorUrl;
+    this.refreshUrl = collectorRefreshUrl
+      ?? `${String(collectorUrl).replace(/\/status\/?$/, '')}/refresh`;
+    this.refreshTimeoutMs = 45_000;
     this.normalizer = new StatusNormalizer();
     this.ruleEngine = new RuleEngine();
     this.store = new JsonStore(dashboardFile, this.#defaultDashboard());
@@ -67,6 +70,21 @@ export class DashboardService {
       intentions,
       integrations,
     };
+  }
+
+  async refresh() {
+    // Pede ao coletor um ciclo novo e so entao le o painel: e o que faz o botao
+    // "Atualizar" mostrar segundos em vez de repetir a leitura anterior.
+    try {
+      const response = await fetch(this.refreshUrl, {
+        method: 'POST',
+        signal: AbortSignal.timeout(this.refreshTimeoutMs),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    } catch {
+      // Coletor fora do ar: cai no getDashboard, que mostra o snapshot em disco.
+    }
+    return this.getDashboard();
   }
 
   async updateDevice(id, displayName) {

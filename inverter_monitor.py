@@ -54,7 +54,7 @@ DONGLE_UDP_PORT = 58899
 LOCAL_TCP_PORT = 8899  # porta em que o dongle conecta de volta (fixa no firmware)
 CLOUD_RECOVERY_DELAY = 1.5
 
-__version__ = "1.3.0"
+__version__ = "1.3.1"
 
 log = logging.getLogger("inverter")
 
@@ -779,6 +779,17 @@ def _device_fields(spec) -> tuple[str, str, str | None, float]:
     return name, ip, proto, DEFAULT_CONNECT_TIMEOUT
 
 
+def _now_iso() -> str:
+    """Instante da leitura, com o fuso local.
+
+    Carimbado no FIM do ciclo: o dado so existe depois que o ultimo inversor
+    respondeu. Carimbar o inicio fazia o painel mostrar "Ha 14s" logo depois de uma
+    leitura recem-feita — e, como o ciclo dura quase o mesmo que o intervalo, o
+    numero parecia dobrar entre uma atualizacao e a seguinte.
+    """
+    return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+
+
 def poll_once(devices: list,
               rules: dict[str, dict] | None = None,
               state: dict[str, bool] | None = None,
@@ -786,10 +797,7 @@ def poll_once(devices: list,
     rules = rules or {}
     state = state if state is not None else {}
     last_ok = last_ok if last_ok is not None else {}
-    result = {
-        "timestamp": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
-        "devices": {},
-    }
+    result: dict = {"devices": {}}
     for spec in devices:
         name, ip, proto, connect_timeout = _device_fields(spec)
         entry: dict = {"ip": ip, "protocol": proto, "online": False}
@@ -803,7 +811,7 @@ def poll_once(devices: list,
                 link = Dongle(ip, connect_timeout=connect_timeout)
                 entry.update(READERS[proto](link))
             entry["online"] = True
-            last_ok[name] = result["timestamp"]
+            last_ok[name] = _now_iso()
         except Exception as exc:
             entry["error"] = f"{type(exc).__name__}: {exc}"
             log.warning("%s (%s): %s", name, ip, entry["error"])
@@ -844,7 +852,28 @@ def poll_once(devices: list,
                                "soc<=off" if soc <= off else "histerese"),
                 }
         result["devices"][name] = entry
-    return result
+    return {"timestamp": _now_iso(), "devices": result["devices"]}
+
+
+def run_cycle(devices: list,
+              rules: dict[str, dict] | None,
+              state: dict[str, bool],
+              last_ok: dict[str, str],
+              out_path: str | None = None) -> dict:
+    """Executa um ciclo e publica o resultado.
+
+    Fica atras de `_State.cycle_lock` porque o dongle so aceita uma conexao por vez:
+    um pedido manual de atualizacao durante o ciclo agendado derrubaria os dois com
+    "porta 8899 ocupada".
+    """
+    with _State.cycle_lock:
+        data = poll_once(devices, rules, state, last_ok)
+        with _State.lock:
+            _State.latest = data
+            _State.last_ok = time.time()
+        if out_path:
+            write_json_atomic(out_path, data)
+    return data
 
 
 
@@ -855,6 +884,8 @@ class _State:
     latest: dict = {"devices": {}}
     last_ok: float = 0.0
     lock = threading.Lock()
+    cycle_lock = threading.Lock()
+    cycle = None  # callable que roda um ciclo e devolve o snapshot
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -877,6 +908,9 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/status":
             with _State.lock:
                 self._send(_State.latest)
+        elif path == "/refresh":
+            # GET existe so para conferir na mao (curl); o painel usa POST.
+            self._refresh()
         elif path.startswith("/status/"):
             name = path[len("/status/"):]
             with _State.lock:
@@ -887,7 +921,26 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self._send(dev)
         else:
-            self._send({"endpoints": ["/status", "/status/<nome>", "/health"]}, 404)
+            self._send({"endpoints": ["/status", "/status/<nome>", "/health", "/refresh"]}, 404)
+
+    def do_POST(self):
+        path = self.path.rstrip("/") or "/"
+        if path == "/refresh":
+            self._refresh()
+        else:
+            self._send({"endpoints": ["/refresh"]}, 404)
+
+    def _refresh(self):
+        """Roda um ciclo agora e devolve o snapshot novo (pode levar o ciclo inteiro)."""
+        cycle = _State.cycle
+        if cycle is None:
+            self._send({"error": "coleta nao iniciada"}, 503)
+            return
+        try:
+            self._send(cycle())
+        except Exception as exc:  # noqa: BLE001
+            log.warning("atualizacao manual falhou: %s", exc)
+            self._send({"error": f"{type(exc).__name__}: {exc}"}, 500)
 
 
 class _HttpServer(ThreadingHTTPServer):
@@ -992,16 +1045,13 @@ def main() -> int:
 
     automation_state: dict[str, bool] = {}
     last_ok: dict[str, str] = {}
+    _State.cycle = lambda: run_cycle(devices, rules, automation_state, last_ok, out_path)
     log.info("monitorando %d inversores a cada %.0fs (timeout %0.fs por dongle)",
              len(devices), args.interval, args.connect_timeout)
     try:
         while True:
             t0 = time.time()
-            data = poll_once(devices, rules, automation_state, last_ok)
-            with _State.lock:
-                _State.latest = data
-                _State.last_ok = time.time()
-            write_json_atomic(out_path, data)
+            data = _State.cycle()
             for name, d in data["devices"].items():
                 if d.get("online"):
                     b = d.get("battery", {})

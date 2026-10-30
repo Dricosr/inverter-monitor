@@ -3,6 +3,29 @@
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 e versionamento [SemVer](https://semver.org/lang/pt-BR/).
 
+## [1.3.1] — 2026-10-31
+
+### Corrigido
+
+- **O tempo "Há N s" parecia dobrar a cada atualização.** O carimbo `timestamp` era
+  gravado no **início** do ciclo, mas o snapshot só é publicado no fim: com três
+  inversores o ciclo leva ~14 s, então uma leitura recém-feita já aparecia como "Há 14 s"
+  e, uma atualização depois, como "Há 28 s". Agora o carimbo marca o **fim** do ciclo —
+  quando o dado passa a existir — e o contador começa em zero.
+- O `last_ok` de cada inversor passou a ser o instante da leitura daquele inversor, em vez
+  do carimbo do ciclo.
+
+### Adicionado
+
+- **O botão Atualizar agora força uma leitura de verdade.** `POST /api/refresh` (painel)
+  chama `POST /refresh` no coletor, que executa um ciclo na hora e devolve o snapshot
+  novo; só então a tela é redesenhada. Antes ele relia o que já estava em memória, então
+  o tempo não zerava — o que dava a impressão de botão quebrado.
+- O botão mostra `Atualizando…` e fica desabilitado durante o ciclo (5 a 30 s, conforme
+  quantos inversores respondem), para não empilhar requisições.
+- `run_cycle()` com trava: um refresh manual nunca roda ao mesmo tempo que o ciclo
+  agendado, senão os dois brigariam pela porta 8899 do dongle.
+
 ## [1.3.0] — 2026-10-31
 
 ### Adicionado

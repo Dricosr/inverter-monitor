@@ -3,7 +3,7 @@
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Node.js](https://img.shields.io/badge/node.js-20%2B-5FA04E)
 ![Dependências](https://img.shields.io/badge/depend%C3%AAncias-nenhuma-brightgreen)
-![Testes](https://img.shields.io/badge/testes-87%20passando-brightgreen)
+![Testes](https://img.shields.io/badge/testes-95%20passando-brightgreen)
 ![Licença](https://img.shields.io/badge/licen%C3%A7a-MIT-green)
 ![Plataforma](https://img.shields.io/badge/plataforma-windows%20%7C%20linux%20%7C%20macos-lightgrey)
 
@@ -195,6 +195,17 @@ porta 8899 e não mexe na nuvem. Ele consulta o coletor ao vivo em
 `http://127.0.0.1:8080/status` e usa `data/latest.json` apenas como *fallback*, então
 nunca se torna um segundo coletor concorrente.
 
+O botão **Atualizar** não relê o que já está em memória: ele pede ao coletor
+(`POST /api/refresh` → `POST /refresh` no coletor) que execute um ciclo **agora** e só
+então desenha a tela, então o tempo volta a `Há 0 s`. Durante a espera — o ciclo leva de
+5 a 30 segundos, dependendo de quantos inversores respondem — o botão mostra
+`Atualizando…` e fica desabilitado, para não empilhar requisições no dongle.
+
+> O carimbo `timestamp` marca o **fim** do ciclo, que é quando o dado passa a existir.
+> Carimbar o início fazia o painel mostrar "Há 14 s" logo depois de uma leitura
+> recém-feita — e, como o ciclo dura quase o mesmo que o intervalo, o número parecia
+> dobrar entre uma atualização e a seguinte.
+
 **Visão geral**
 
 - chips no topo: leitura ao vivo/atrasada, tempo desde a última leitura, `2/3 online`,
@@ -346,6 +357,7 @@ o próprio aparelho o informa, é lido automaticamente (registradores 186–192 
 
 Variáveis de ambiente do painel: `PORT` (3071), `HOST`, `INVERTER_COLLECTOR_URL`,
 `INVERTER_SNAPSHOT_FILE`, `INVERTER_DASHBOARD_FILE`, `INVERTER_DEVICES_FILE`,
+`INVERTER_COLLECTOR_REFRESH_URL` (padrão: derivado da URL de status),
 `DASHBOARD_POLL_MS` (10000), `GATE_BASE_URL`, `EP2_XMRIG_URL`, `EP2_XMRIG_CONFIG`,
 `EP2_XMRIG_TOKEN`, `EP2_MINING_BASE_THREADS` (30), `AUTOMATION_ENABLED` (true),
 `AUTOMATION_STATE_FILE`.
@@ -374,6 +386,7 @@ cron/agendador).
 | --- | --- |
 | `GET /status` | JSON completo, com todos os inversores |
 | `GET /status/<nome>` | JSON de um inversor (ex.: `/status/inversor-106`) |
+| `POST /refresh` | Executa um ciclo **agora** e devolve o snapshot novo (leva o ciclo inteiro; `GET` também aceito, para conferir no `curl`) |
 | `GET /health` | `{"ok": true}`, `200` se o último ciclo rodou há menos de 120 s; senão `503` |
 
 ```powershell
@@ -392,6 +405,7 @@ curl -s http://localhost:8080/status/inversor-59 | jq .pv
 | Rota | Método | Retorno |
 | --- | --- | --- |
 | `/api/dashboard` | GET | Inversores normalizados, integrações, regras e estado de execução |
+| `/api/refresh` | POST | Pede um ciclo novo ao coletor e devolve o dashboard atualizado |
 | `/api/devices/<id>` | PUT | Salva o nome exibido (`{ "displayName": "..." }`) |
 | `/api/rules` | POST | Cria regra (`id`, `name`, `action`, `sourceDeviceId`, `activateBelow`, `resumeAbove`, `desiredIntensity`, `enabled`) |
 | `/api/rules/<id>` | PUT / DELETE | Atualiza ou exclui uma regra |
@@ -590,6 +604,7 @@ executores falsos, sem tocar no Gate, no SSH ou no XMRig.
 | `Geração solar 0 W` no `.106` de dia | PV1 sem painéis e o MPPT2 zerado | Confira o visor do MPPT2; se ele disser `não exposto`, o mapa 0925 não respondeu |
 | `Corrente de carga (parcial)` | Um inversor PI30 sem o mapa 0925 | Esperado nesse caso; com o 0925 o rótulo desaparece |
 | `MPPT2 não exposto` no `.106` | O mapa 0925 não respondeu neste ciclo | Rode com `-v`; o leitor cai para PI30 puro e volta ao normal no próximo ciclo |
+| Tempo desde a leitura parecia dobrar | Era o carimbo do início do ciclo | Corrigido na 1.3.1: o `timestamp` marca o fim do ciclo |
 | Temperatura `—` | Modelo não expõe aquele sensor | Esperado; o tooltip da métrica explica |
 | EP2 volta às threads máximas sozinha | `"watch": true` no `config.json` do XMRig | Use `"watch": false` |
 | Regra em `Conflito` | A pausa do Gate foi criada por outra origem | A automação não desfaz pausa alheia; libere manualmente |
@@ -656,5 +671,6 @@ executores falsos, sem tocar no Gate, no SSH ou no XMRig.
 ## Licença
 
 MIT — veja [LICENSE](LICENSE).
+
 
 
