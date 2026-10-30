@@ -242,6 +242,7 @@ function renderDevices(devices) {
           <div class="device-identity">
             <h3>${escapeHtml(device.name)}</h3>
             <span class="device-meta">${escapeHtml(device.ip || 'IP não informado')} · ${escapeHtml(PROTOCOL_LABELS[device.protocol] ?? device.protocol ?? 'protocolo não informado')}</span>
+            ${identityLine(device)}
           </div>
           <button class="icon-button" title="Renomear inversor" data-edit-device="${escapeHtml(device.id)}">✎</button>
         </div>
@@ -282,6 +283,22 @@ function metric(label, value, hint) {
 
 function formatAmps(value) {
   return Number.isFinite(value) ? `${value.toFixed(1)} A` : '—';
+}
+
+/**
+ * PN e SN do aparelho. O PN vem do `devices.json` (o inversor nao o expoe pela LAN);
+ * o SN so aparece quando o proprio aparelho o informa de forma confiavel.
+ */
+function identityLine(device) {
+  const parts = [];
+  if (device.pn) parts.push(`PN ${device.pn}`);
+  if (device.serial && device.serialTrusted) parts.push(`SN ${device.serial}`);
+  if (!parts.length) return '';
+  const text = parts.join(' · ');
+  const hint = device.serial && !device.serialTrusted
+    ? 'O serial informado por este firmware não corresponde ao do fabricante e foi omitido'
+    : text;
+  return `<span class="device-ids" title="${escapeHtml(hint)}">${escapeHtml(text)}</span>`;
 }
 
 /**

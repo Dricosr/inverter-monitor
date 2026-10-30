@@ -192,6 +192,8 @@ nunca se torna um segundo coletor concorrente.
 - um card por inversor com as métricas de operação (potência de saída, carga no
   inversor, temperatura do inversor, temperatura do painel, tensão da bateria, corrente
   de carga, corrente de descarga);
+- identificação com **IP, protocolo, PN e SN** (o SN só aparece quando o aparelho o
+  informa de verdade);
 - **bloco "Entradas PV" com um visor por MPPT** — `MPPT1 765 W · 211,0 V · 3,6 A` e
   `MPPT2 863 W · 214,5 V · 4,0 A` — mais o somatório no cabeçalho do bloco;
 - entrada que o firmware esconde aparece tracejada como `não exposto`, com o motivo e o
@@ -316,15 +318,19 @@ Ajuste [`devices.json`](devices.json) se os IPs forem outros:
 
 ```json
 [
-  { "name": "anenji-6k2",   "ip": "192.168.18.33",  "protocol": "modbus_a", "soc_on": 60, "soc_off": 45 },
-  { "name": "inversor-59",  "ip": "192.168.18.59",  "protocol": "modbus_b", "soc_on": 60, "soc_off": 45 },
-  { "name": "inversor-106", "ip": "192.168.18.106", "protocol": "pi30",     "soc_on": 60, "soc_off": 45 }
+  { "name": "anenji-6k2",   "ip": "192.168.18.33",  "protocol": "modbus_a", "pn": "Q0048085649157",    "soc_on": 60, "soc_off": 45 },
+  { "name": "inversor-59",  "ip": "192.168.18.59",  "protocol": "modbus_b", "pn": "I30000251546403679", "soc_on": 60, "soc_off": 45 },
+  { "name": "inversor-106", "ip": "192.168.18.106", "protocol": "pi30",     "pn": "Q0045529822108",    "soc_on": 60, "soc_off": 45 }
 ]
 ```
 
 `"protocol"` pode ser omitido — nesse caso a detecção automática testa os três (mais
 lenta). Os valores em `"name"` viram as chaves do JSON e as rotas da API. Reservar IP
 fixo no roteador evita ter de editar o arquivo.
+
+`"pn"` é opcional e serve apenas para exibição: **nenhum comando local devolve o PN**,
+então ele é informado aqui com o mesmo valor que o app do fabricante mostra. O SN, quando
+o próprio aparelho o informa, é lido automaticamente (registradores 186–192 no mapa B).
 
 Variáveis de ambiente do painel: `PORT` (3071), `HOST`, `INVERTER_COLLECTOR_URL`,
 `INVERTER_SNAPSHOT_FILE`, `INVERTER_DASHBOARD_FILE`, `INVERTER_DEVICES_FILE`,
@@ -389,12 +395,15 @@ Cada dispositivo é um objeto. Campos com `*` dependem do protocolo.
 | --- | --- | --- |
 | `ip` | string | IP do dongle |
 | `protocol` | `modbus_a` \| `modbus_b` \| `pi30` | Protocolo detectado/configurado |
+| `pn`* | string | PN do aparelho, vindo do `devices.json` (o inversor não o expõe pela LAN) |
+| `serial`* | string | SN informado pelo aparelho (`modbus_b`: registradores 186–192; `pi30`: `QID`) |
+| `serial_trusted`* | bool | `false` quando o firmware devolve um placeholder (caso do `QID` no `pi30`) |
 | `online` | bool | `true` se o ciclo conseguiu ler |
 | `error` | string | Presente apenas quando `online = false` |
 | `last_ok` | string \| null | ISO-8601 da última leitura boa |
 | `mode` | string \| null | Modo de operação (`Off-Grid`, `Battery`, `Line`, `Standby`…) |
 | `status_code`* | int | Código bruto do modo (`modbus_b`), útil para diagnóstico |
-| `serial`* | string | Serial informado pelo `QID` (`pi30`) — ver ressalva acima |
+| `serial`* | string | Serial informado pelo `QID` (`pi30`) — ver `serial_trusted` |
 | `battery.soc` | int | **SOC em %** |
 | `battery.voltage` | float | Tensão da bateria (V) |
 | `battery.current`* | float | Corrente (A); negativo = descarregando (`modbus_a`/`modbus_b`) |

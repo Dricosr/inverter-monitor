@@ -67,8 +67,8 @@ Enviando um payload fixo (a hora UTC atual) e variando o `fc` em `0..20`:
 | `fc` | Resposta de `.106` | Interpretação |
 | --- | --- | --- |
 | 0 | frame vazio | — |
-| 1 | `Q0045529822108` | **PN do coletor** — é o mesmo PN que a nuvem usa para identificar a unidade (SN `Q0045529822108191005`) |
-| 2 | `01 1a` | byte de configuração (26) |
+| 1 | `Q0045529822108` (histórico) | PN do coletor — hoje responde **timeout** em qualquer payload testado |
+| 2 | `00 31 [Rede_office,100],[…]` | **varredura de redes WiFi** (SSID + RSSI); não identifica o aparelho |
 | 3 | `01 0a` | byte de configuração (10) |
 | 4 | `01 17` | byte de configuração (23) |
 | 5 | `00 15 "ess.eybond.com"` | **domínio da nuvem** (string com prefixo de tamanho) |
@@ -306,6 +306,11 @@ requisição é uma ida e volta pelo dongle.
 | 390 | Corrente PV2 | ÷10 A | 391 ≈ 389 × 390 |
 | **391** | **Potência PV2** | W | 278 ↔ 186,4 V × 1,4 A |
 | **691** | **Potência nominal** | W (`11000` no `.59`) | — |
+| **186–192** | **SN em ASCII** (14 caracteres) | 2 chars por registrador | `92B32504103913` = SN da nuvem |
+
+> ⚠️ **Leituras curtas voltam zeradas.** `186+7` e `180+13` respondem tudo zero nesse
+> dongle; só blocos maiores e alinhados (`180+20`) devolvem o serial. As leituras de
+> produção usam `180+20` justamente por isso.
 
 A potência PV vem do **registrador medido** (353 e 391) e cai para `V × I` só quando
 o firmware não informa a potência. O total publicado é a soma das duas entradas, e

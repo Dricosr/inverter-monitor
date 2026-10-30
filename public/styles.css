@@ -81,6 +81,7 @@ h2 { margin: 4px 0 0; font-size: 22px; }
 .device-identity { min-width: 0; }
 .device-head h3 { margin: 0 0 6px; font-size: 18px; letter-spacing: -.01em; }
 .device-meta { color: var(--muted); font-size: 12px; }
+.device-ids { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; letter-spacing: .01em; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .icon-button { border: 1px solid transparent; background: transparent; color: var(--muted); cursor: pointer; font-size: 16px; line-height: 1; padding: 6px; border-radius: 8px; flex: none; }
 .icon-button:hover { border-color: var(--line); color: var(--text); }
 .device-body { padding: 16px 18px 18px; display: grid; gap: 14px; }

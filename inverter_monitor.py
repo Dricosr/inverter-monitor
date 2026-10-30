@@ -54,7 +54,7 @@ DONGLE_UDP_PORT = 58899
 LOCAL_TCP_PORT = 8899  # porta em que o dongle conecta de volta (fixa no firmware)
 CLOUD_RECOVERY_DELAY = 1.5
 
-__version__ = "1.1.4"
+__version__ = "1.1.5"
 
 log = logging.getLogger("inverter")
 
@@ -268,6 +268,23 @@ def _pv_input_unreadable(index: int, reason: str) -> dict:
             "readable": False, "reason": reason}
 
 
+def _ascii_from_regs(regs: list[int], count: int) -> str | None:
+    """Le os primeiros `count` registradores como texto ASCII (2 caracteres cada).
+
+    O `.59` guarda o serial nesse formato nos registradores 186-192: a leitura crua
+    devolve `92B32504103913`, o mesmo SN que o app do fabricante mostra.
+    """
+    if len(regs) < count:
+        return None
+    texto = "".join(chr((r >> 8) & 0xFF) + chr(r & 0xFF) for r in regs[:count])
+    texto = texto.split("\x00")[0].strip()
+    if len(texto) < 8 or not all(32 <= ord(c) < 127 for c in texto):
+        return None
+    if not any(c.isdigit() for c in texto):
+        return None
+    return texto
+
+
 def _signed_or_none(value: int | None) -> int | None:
     return None if value is None else s16(value)
 
@@ -325,6 +342,9 @@ def read_modbus_b(link: Dongle) -> dict:
     PV2 389-391. Blocos grandes reduzem a ida e volta pelo dongle.
     """
     head = _safe_block(link, 200, 37)
+    # Bloco alinhado de 180 com 20 registradores: leituras curtas (186+7, 180+13) voltam
+    # zeradas nesse dongle. O serial fica em 186-192 e vem como texto ASCII.
+    serial_block = _safe_block(link, 180, 20)
     bat = _required_block(link, 277, 29)
     out = _required_block(link, 252, 4)
     acpv = _safe_block(link, 342, 12)
@@ -351,6 +371,7 @@ def read_modbus_b(link: Dongle) -> dict:
             "dcdc": _reg(bat, 277, 281),
             "pv": _reg(bat, 277, 305),
         },
+        serial=_ascii_from_regs(serial_block[6:], 7),
     )
 
 
@@ -358,7 +379,8 @@ def parse_modbus_b(bat: list[int], out: list[int], grid: list[int],
                    ac: list[int], pv: dict,
                    status: list[int] | None = None,
                    load_percent: list[int] | None = None,
-                   temperatures: dict | None = None) -> dict:
+                   temperatures: dict | None = None,
+                   serial: str | None = None) -> dict:
     """Decodifica os blocos do mapa Anenji/Megarevo."""
     status = status or []
     load_percent = load_percent or []
@@ -386,6 +408,7 @@ def parse_modbus_b(bat: list[int], out: list[int], grid: list[int],
         "protocol": "modbus_b",
         "mode": None if mode_code is None else MODES_MODBUS_B.get(mode_code, f"desconhecido({mode_code})"),
         "status_code": mode_code,
+        "serial": serial,
         "battery": {
             "soc": bat[3],
             "voltage": round(bat[0] / 10, 1),
@@ -610,6 +633,15 @@ def poll_once(devices: list,
             if link:
                 link.close()
 
+        # O PN nao sai por nenhum comando local: vem do `devices.json`, com o mesmo valor
+        # que o app do fabricante mostra. O serial so e publicado quando o proprio
+        # aparelho o informa de forma confiavel (o `QID` do PI30 devolve um placeholder).
+        pn = spec.get("pn") if isinstance(spec, dict) else None
+        if pn:
+            entry["pn"] = pn
+        if entry.get("serial") and entry.get("protocol") == "pi30":
+            entry["serial_trusted"] = False
+
         if not entry["online"]:
             # Mantem a hora da ultima leitura boa para a UI explicar o que aconteceu.
             entry["last_ok"] = last_ok.get(name)
@@ -720,7 +752,7 @@ def load_devices() -> tuple[list[dict], dict[str, dict]]:
         ]
     devices = [
         {"name": d["name"], "ip": d["ip"], "protocol": d.get("protocol"),
-         "connect_timeout": d.get("connect_timeout")}
+         "connect_timeout": d.get("connect_timeout"), "pn": d.get("pn")}
         for d in data
     ]
     rules = {d["name"]: d for d in data if "soc_on" in d or "soc_off" in d}

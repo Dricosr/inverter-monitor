@@ -125,6 +125,27 @@ test('normaliza uma entrada PV por MPPT e preserva a ilegivel', () => {
   assert.equal(result[1].pv.inputs[0].power, 0, 'zero medido continua zero');
 });
 
+test('PN entra sempre; SN so quando o aparelho informa de verdade', () => {
+  const result = new StatusNormalizer().normalize({
+    timestamp: '2026-10-30T11:00:00-03:00',
+    devices: {
+      a: { online: true, pn: 'I30000251546403679', serial: '92B32504103913', battery: {}, pv: {}, output: {}, grid: {} },
+      b: { online: true, pn: 'Q0045529822108', serial: '55355535553555', serial_trusted: false, battery: {}, pv: {}, output: {}, grid: {} },
+      c: { online: true, battery: {}, pv: {}, output: {}, grid: {} },
+    },
+  }, [{ name: 'a' }, { name: 'b' }, { name: 'c', pn: 'Q0048085649157' }]);
+
+  assert.equal(result[0].pn, 'I30000251546403679');
+  assert.equal(result[0].serial, '92B32504103913');
+  assert.equal(result[0].serialTrusted, true);
+  // O QID do .106 devolve um placeholder: o serial nao pode ser exibido como verdadeiro
+  assert.equal(result[1].serial, '55355535553555');
+  assert.equal(result[1].serialTrusted, false);
+  assert.equal(result[2].pn, 'Q0048085649157', 'devices.json serve de fonte do PN');
+  assert.equal(result[2].serial, null);
+  assert.equal(result[2].serialTrusted, false);
+});
+
 test('offline preserva motivo e hora da ultima leitura', () => {
   const result = new StatusNormalizer().normalize({
     timestamp: '2026-10-30T09:00:00-03:00',

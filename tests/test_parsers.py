@@ -163,6 +163,20 @@ class TestParseModbusB(unittest.TestCase):
         self.assertEqual(legiveis, [False, False])
         self.assertEqual([e["mppt"] for e in d["pv"]["inputs"]], [1, 2])
 
+    def test_serial_do_bloco_ascii(self):
+        # registradores 186-192 do .59 lidos como texto: SN que a nuvem confirma
+        regs = [0x3932, 0x4233, 0x3235, 0x3034, 0x3130, 0x3339, 0x3133]
+        self.assertEqual(im._ascii_from_regs(regs, 7), "92B32504103913")
+
+    def test_serial_zerado_nao_vira_texto(self):
+        self.assertIsNone(im._ascii_from_regs([0] * 7, 7))
+        self.assertIsNone(im._ascii_from_regs([0x3932], 7), "bloco curto demais")
+
+    def test_serial_aparece_no_payload(self):
+        d = im.parse_modbus_b(self.BAT, self.OUT, self.GRID, self.AC, self.PV,
+                              serial="92B32504103913")
+        self.assertEqual(d["serial"], "92B32504103913")
+
     def test_potencia_pv_sem_corrente_fica_none(self):
         d = im.parse_modbus_b(self.BAT, self.OUT, self.GRID, self.AC, self.PV)
         self.assertIsNone(d["pv"]["power"])

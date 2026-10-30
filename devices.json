@@ -3,6 +3,7 @@
     "name": "anenji-6k2",
     "ip": "192.168.18.33",
     "protocol": "modbus_a",
+    "pn": "Q0048085649157",
     "soc_on": 60,
     "soc_off": 45
   },
@@ -10,6 +11,7 @@
     "name": "inversor-59",
     "ip": "192.168.18.59",
     "protocol": "modbus_b",
+    "pn": "I30000251546403679",
     "soc_on": 60,
     "soc_off": 45
   },
@@ -17,6 +19,7 @@
     "name": "inversor-106",
     "ip": "192.168.18.106",
     "protocol": "pi30",
+    "pn": "Q0045529822108",
     "soc_on": 60,
     "soc_off": 45
   }

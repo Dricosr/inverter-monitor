@@ -3,6 +3,27 @@
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 e versionamento [SemVer](https://semver.org/lang/pt-BR/).
 
+## [1.1.5] — 2026-10-31
+
+### Adicionado
+
+- **PN visível em cada cartão.** O PN é informado em `devices.json` (`"pn"`) e aparece
+  na identificação do inversor, com o mesmo valor que o app do fabricante mostra.
+  Nenhum comando local devolve o PN: o `fc=1` do dongle, que já respondeu
+  `Q0045529822108`, hoje só devolve timeout, e o `fc=2` é a varredura de redes WiFi.
+- **SN lido do próprio aparelho no mapa B.** Os registradores 186–192 do `.59` guardam
+  o serial em ASCII (`92B32504103913`) — idêntico ao SN da nuvem. O cartão passa a
+  mostrar `PN … · SN …`.
+
+### Corrigido
+
+- **O serial do `.106` não é exibido como se fosse verdadeiro.** O `QID` devolve
+  `55355535553555`, que não corresponde ao SN do fabricante (`Q0045529822108191005`).
+  A API marca `serial_trusted: false` e o cartão omite o SN desses aparelhos.
+- **Leituras curtas de Modbus voltam zeradas nesse dongle**: `186+7` e `180+13` retornam
+  tudo zero e só `180+20` (alinhado) devolve o bloco do serial. Registrado no código e
+  no `PROTOCOL.md`.
+
 ## [1.1.4] — 2026-10-31
 
 ### Corrigido
