@@ -41,6 +41,11 @@ e versionamento [SemVer](https://semver.org/lang/pt-BR/).
 - **Coletores duplicados.** No Windows `SO_REUSEADDR` permite vários binds na mesma
   porta, então três instâncias subiam juntas e disputavam o mesmo dongle, causando
   timeouts intermitentes. A segunda instância agora falha ao abrir a porta e encerra.
+- **EP2 voltava ao máximo sozinha.** O XMRig tinha `"watch": true` e recarregava o
+  `config.json` a cada hora, trocando o perfil de 3 threads pelo automático (20) mesmo
+  com `--threads=3` na linha de comando — e a automação só olhava a linha de comando,
+  então reportava "alinhada". O hot reload foi desligado e a verificação passou a usar
+  `/2/backends` (threads reais), com correção automática de qualquer deriva.
 - Textos da UI com jargão interno, idioma misturado e uma frase incorreta ("nenhuma ação
   é enviada"), além de elementos colados e grids espremidos no celular.
 

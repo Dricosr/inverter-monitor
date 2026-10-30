@@ -304,8 +304,18 @@ independente para três ações configuradas pela interface:
 | Ação | Estado ativo | Estado normal |
 | --- | --- | --- |
 | Gate | `POST /v1/admin/pausar` | `POST /v1/admin/retomar` |
-| EP2 | XMRig reiniciado com threads proporcionais à intensidade reduzida | restaura 30 threads |
+| EP2 | XMRig reiniciado com as threads da intensidade reduzida | restaura o total configurado |
 | ai-node | `ainode-mining-mode ai <percentual>` via SSH autorizado | `ainode-mining-mode normal` |
+
+No EP2 a automação não confia na linha de comando: consulta `/2/backends` do XMRig e
+compara o **número real de threads** com o desejado. Se um reinício manual, um reload
+de configuração ou qualquer outro ator mudar o perfil, a diferença é corrigida no
+próximo ciclo (10 s).
+
+> ⚠️ O `config.json` do XMRig da EP2 usa **`"watch": false`**. Com `watch: true` ele
+> recarregava o arquivo sozinho e voltava ao perfil automático (20 threads), anulando a
+> redução mesmo com `--threads=3` na linha de comando. Alterações no `config.json`
+> passam a valer no próximo reinício — que é justamente o que o executor faz.
 
 Cada regra escolhe seu próprio inversor de referência, limiares de ativação e
 retomada e intensidade reduzida. O executor mantém estado persistido e verifica o

@@ -15,16 +15,11 @@ function Get-Miner {
         Where-Object { $_.Name -eq 'xmrig.exe' -and $_.CommandLine -like "*$Base*" }
 }
 
-$live = Get-Miner
-$matching = $live | Where-Object { $_.CommandLine -match $pattern }
-if ($matching) {
-    Set-Content -Path $ThreadsFile -Value $Threads -NoNewline
-    Write-Output 'changed=false verified=true'
-    exit 0
-}
-
 Set-Content -Path $ThreadsFile -Value $Threads -NoNewline
 
+# Reinicia sempre. A linha de comando pode ja dizer --threads=N e o XMRig estar
+# rodando com outro perfil (o config tem hot reload), entao quem decide se precisa
+# reiniciar e o chamador, que consulta as threads reais pela API /2/backends.
 Stop-ScheduledTask -TaskName $TaskName -ErrorAction Stop
 for ($i = 0; $i -lt 20; $i++) {
     if (-not (Get-Miner)) { break }
@@ -43,5 +38,5 @@ for ($i = 0; $i -lt 30; $i++) {
     if (Get-Miner | Where-Object { $_.CommandLine -match $pattern }) { $verified = $true; break }
 }
 
-Write-Output ("changed=true verified={0}" -f $verified.ToString().ToLower())
+Write-Output ("restarted=true cmdline_ok={0}" -f $verified.ToString().ToLower())
 if (-not $verified) { exit 1 }

@@ -20,6 +20,9 @@ export class AutomationService {
     pollMs = 10_000,
     gateUrl,
     ep2BaseThreads = 30,
+    ep2XmrigUrl,
+    ep2XmrigConfig,
+    ep2XmrigToken,
     executors,
     rulesProvider,
     deviceProvider,
@@ -34,7 +37,11 @@ export class AutomationService {
     this.stateStore = new JsonStore(stateFile, { actions: {}, updatedAt: null });
     this.executors = executors ?? {
       gate_pause: new GateActionExecutor(gateUrl),
-      ep2_mining_reduce: new Ep2MiningActionExecutor(ep2BaseThreads),
+      ep2_mining_reduce: new Ep2MiningActionExecutor(ep2BaseThreads, {
+        apiUrl: ep2XmrigUrl,
+        configPath: ep2XmrigConfig,
+        token: ep2XmrigToken,
+      }),
       ainode_mining_reduce: new AiNodeMiningActionExecutor(),
     };
     this.rulesProvider = rulesProvider ?? (async () => {
