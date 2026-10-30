@@ -29,6 +29,21 @@ e versionamento [SemVer](https://semver.org/lang/pt-BR/).
   potências confirmam a escala, e o total bate com o registrador 302 (PV total).
 - `docs/PROTOCOL.md` ganhou a tabela de conferência local × nuvem do mapa B.
 
+### Documentação
+
+- **`README.md` reescrito** com a estrutura atual: o que cada protocolo entrega (tabela
+  honesta por grandeza), o caso do MPS 10.2, o painel, a automação por SOC, o formato do
+  JSON e as limitações reais.
+- **Matriz real de comandos PI30** no `PROTOCOL.md`. `QPIRI`, `QPIWS`, `QDI`, `QPI`,
+  `QFLAG`, `QFS`, `QMCHGCR` e `QMUCHCR` **respondem** — antes o documento os listava como
+  `NAK`. A lista de não suportados ficou explícita (19 comandos).
+- Registrado que o **`QID` do `.106` não devolve o serial real** (`553…` contra
+  `Q0045529822108191005` na nuvem; o PN vem de `fc=1`).
+- Registrado que o `QPIRI` é a fonte dos limites de carga (bulk 56,5 V, float 56,0 V,
+  corte 48,0 V, 70 A máx.) e que os campos de potência nominal dele vêm zerados nesse
+  clone — o nominal de 10 200 VA/W está na nuvem.
+- `pyproject.toml` estava em `1.0.0`; alinhado com o resto do projeto.
+
 ### Alterado
 
 - **Uma requisição a menos por ciclo no `.59`**: o mapa B passou de seis blocos pequenos

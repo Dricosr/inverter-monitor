@@ -67,7 +67,7 @@ Enviando um payload fixo (a hora UTC atual) e variando o `fc` em `0..20`:
 | `fc` | Resposta de `.106` | Interpretação |
 | --- | --- | --- |
 | 0 | frame vazio | — |
-| 1 | `Q0045529822108` | **serial do coletor** |
+| 1 | `Q0045529822108` | **PN do coletor** — é o mesmo PN que a nuvem usa para identificar a unidade (SN `Q0045529822108191005`) |
 | 2 | `01 1a` | byte de configuração (26) |
 | 3 | `01 0a` | byte de configuração (10) |
 | 4 | `01 17` | byte de configuração (23) |
@@ -111,15 +111,46 @@ bytes de CRC (`73 73`) são impressos como `s` `s` — daí o visual `(NAKss\r`.
 
 ### Comandos aceitos
 
+Matriz levantada no `.106` (payload de consulta puro, `fc=4`):
+
 | Comando | Resposta observada |
 | --- | --- |
 | `QPIGS` | `(000.0 00.0 231.3 60.0 1175 0983 013 414 52.20 000 040 0047 00.0 000.0 52.20 00022 00010000 00 00 00000 010<CRC>\r` |
 | `QMOD` | `(B<CRC>\r` — `L` line, `B` battery, `S` standby, `F` fault, `P` power on, `H` power saving |
-| `QID` | `(55355535553555<CRC>\r` |
+| `QPI` | `(PI30<CRC>\r` — família de protocolo |
+| `QMN` | `(VMII-NXPW5KW<CRC>\r` — modelo |
 | `QVFW` | `(VERFW:00152.02<CRC>\r` |
-| `QPIRI`, `QPIWS`, `QPIGS2`, `QET`, `QPGS0`, `QFLAG`, `QPI`, `QDI`, `QLT`, `QBEQS`, `QSTATUS`, `QALL` | `(NAKss\r` — **não suportados** neste firmware |
+| `QVFW2` | `(VERFW2:00000.00<CRC>\r` |
+| `QID` | `(55355535553555<CRC>\r` — **não é o serial real**, ver nota abaixo |
+| `QPIRI` | `(230.0 44.3 230.0 60.0 44.3 0200 0200 48.0 48.0 48.0 56.5 56.0 2 002 070 0 1 0 1 01 0 0 50.0 0 1 48.0 10 52.0<CRC>\r` |
+| `QDI` | `(230.0 50.0 0030 42.0 54.0 56.4 46.0 50 0 0 2 0 0 0 0 0 1 1 1 0 1 0 54.0 0 1<CRC>\r` |
+| `QFLAG` | `(EuvyzlDabjkxgd<CRC>\r` |
+| `QPIWS` | `(00000100000000000000000000000000<CRC>\r` |
+| `QMCHGCR` | `(010 020 030 040 050 060 070 080<CRC>\r` — correntes de carga CC aceitas |
+| `QMUCHGCR` | `(002 010 020 030 040 050 060<CRC>\r` |
+| `QFS` | `(01 08 03 0398 0200 0002 000.0 00.00 245.9 60.00 000.0 509.0 64.3 055 164<CRC>\r` |
+
+**Não suportados neste firmware** (`(NAKss\r`):
+
+```
+QPIRI2  QPIGS2  QPIGS3  QPGS0   QPGS1   QPI2    QSTATUS  QALL   QET   QLT
+QBE     QPIZ    QPIC    QOPPT   QCVCR   QDOP    QEY      QEM    QHID
+```
 
 > Note que `P005GS` também é NAK. As variantes `P00xGS` de outros OEMs não valem aqui.
+
+O `QPIRI` é a fonte dos limites de carga: bulk **56,5 V**, float **56,0 V**, corte
+**48,0 V** e corrente máxima de carga **70 A**. Os campos de potência nominal vêm como
+`0200 0200` (200 VA/W) — valor inútil nesse clone; o nominal real de 10 200 VA/W está na
+nuvem, não no `QPIRI`.
+
+> **`QID` mente.** O `.106` responde `55355535553555`, mas o fabricante o identifica por
+> `Q0045529822108191005` (PN `Q0045529822108`, que é justamente o retorno de `fc=1`).
+> Nunca use o `QID` como chave de dispositivo.
+
+> **`QPIWS` é o registro de alarmes** (32 bits, um caractere por bit). Está disponível,
+> mas o mapeamento bit a bit ainda não foi validado — por isso o coletor ainda não o
+> publica. Especificação em aberto no [roadmap](../README.md#roadmap).
 
 ### Campos do `QPIGS`
 
@@ -341,8 +372,9 @@ Ordem testada: `modbus_a` → `modbus_b` → `pi30`.
 | HTTP no `.59` | funciona, mas só UI de configuração (`/cjson/system_para.json`, `wlan_ap_list.json`) — sem telemetria |
 | Broadcast UDP `HF-A11ASSISTHREAD` em 48899 | sem resposta |
 | Varredura de `fc` 11–20 | timeout |
-| `QID`/`QPIWS`/`QET`… no `.106` | NAK |
+| `QPIGS2`/`QET`/`QLT`/`QGS*`… no `.106` | NAK — a matriz completa está na [seção 4](#comandos-aceitos) |
 | Slaves Modbus 0–32 no `.106` | timeout (o inversor não fala Modbus) |
+| `fc=1..10` pedindo tabela de dados | só devolve configuração do coletor, nunca telemetria |
 
 ## 10. Reproduzir
 
@@ -356,7 +388,7 @@ python inverter_monitor.py --probe 192.168.18.106 -v
 import inverter_monitor as im
 
 link = im.Dongle("192.168.18.106")
-print(link.ask(1, b""))                    # serial do coletor
+print(link.ask(1, b""))                    # PN do coletor
 print(link.ask(4, im.pi30(b"QMOD")))       # modo
 print(link.ask(4, im.pi30(b"QPIGS")))      # status completo
 link.close()
