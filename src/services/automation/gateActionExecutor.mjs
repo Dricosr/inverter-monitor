@@ -1,3 +1,5 @@
+import { describeNetworkError } from '../../domain/networkError.mjs';
+
 export class GateActionExecutor {
   constructor(baseUrl) {
     this.baseUrl = baseUrl.replace(/\/$/, '');
@@ -56,10 +58,15 @@ export class GateActionExecutor {
   }
 
   async #request(path, method = 'GET') {
-    const response = await fetch(`${this.baseUrl}${path}`, {
-      method,
-      signal: AbortSignal.timeout(4000),
-    });
+    let response;
+    try {
+      response = await fetch(`${this.baseUrl}${path}`, {
+        method,
+        signal: AbortSignal.timeout(4000),
+      });
+    } catch (error) {
+      throw new Error(describeNetworkError(error, 'Gate'));
+    }
     if (!response.ok) throw new Error(`Gate retornou HTTP ${response.status}`);
     return response.json();
   }

@@ -54,7 +54,7 @@ DONGLE_UDP_PORT = 58899
 LOCAL_TCP_PORT = 8899  # porta em que o dongle conecta de volta (fixa no firmware)
 CLOUD_RECOVERY_DELAY = 1.5
 
-__version__ = "1.1.0"
+__version__ = "1.1.1"
 
 log = logging.getLogger("inverter")
 
@@ -462,16 +462,33 @@ def detect_protocol(ip: str) -> tuple[str, dict]:
 # --------------------------------------------------------------------------- #
 # Coleta
 # --------------------------------------------------------------------------- #
-def poll_once(devices: list[tuple[str, str, str | None]],
+DEFAULT_CONNECT_TIMEOUT = 10.0  # curto de proposito: um dongle fora do ar nao pode
+# travar o ciclo inteiro. Com 25 s o ciclo de 15 s virava 32 s e os inversores que
+# estavam respondendo apareciam atrasados na UI.
+
+
+def _device_fields(spec) -> tuple[str, str, str | None, float]:
+    if isinstance(spec, dict):
+        timeout = spec.get("connect_timeout")
+        return (spec["name"], spec["ip"], spec.get("protocol"),
+                float(timeout) if timeout else DEFAULT_CONNECT_TIMEOUT)
+    name, ip, proto = spec
+    return name, ip, proto, DEFAULT_CONNECT_TIMEOUT
+
+
+def poll_once(devices: list,
               rules: dict[str, dict] | None = None,
-              state: dict[str, bool] | None = None) -> dict:
+              state: dict[str, bool] | None = None,
+              last_ok: dict[str, str] | None = None) -> dict:
     rules = rules or {}
     state = state if state is not None else {}
+    last_ok = last_ok if last_ok is not None else {}
     result = {
         "timestamp": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
         "devices": {},
     }
-    for name, ip, proto in devices:
+    for spec in devices:
+        name, ip, proto, connect_timeout = _device_fields(spec)
         entry: dict = {"ip": ip, "protocol": proto, "online": False}
         link = None
         try:
@@ -479,17 +496,21 @@ def poll_once(devices: list[tuple[str, str, str | None]],
                 proto, data = detect_protocol(ip)
                 entry["protocol"] = proto
                 entry.update(data)
-                entry["online"] = True
             else:
-                link = Dongle(ip)
+                link = Dongle(ip, connect_timeout=connect_timeout)
                 entry.update(READERS[proto](link))
-                entry["online"] = True
+            entry["online"] = True
+            last_ok[name] = result["timestamp"]
         except Exception as exc:
             entry["error"] = f"{type(exc).__name__}: {exc}"
             log.warning("%s (%s): %s", name, ip, entry["error"])
         finally:
             if link:
                 link.close()
+
+        if not entry["online"]:
+            # Mantem a hora da ultima leitura boa para a UI explicar o que aconteceu.
+            entry["last_ok"] = last_ok.get(name)
 
         rule = rules.get(name)
         if rule and entry.get("online"):
@@ -583,8 +604,8 @@ def start_http(port: int) -> None:
 # --------------------------------------------------------------------------- #
 # main
 # --------------------------------------------------------------------------- #
-def load_devices() -> tuple[list[tuple[str, str, str | None]], dict[str, dict]]:
-    """(lista de (nome, ip, protocolo), regras de automacao). Le devices.json se existir."""
+def load_devices() -> tuple[list[dict], dict[str, dict]]:
+    """(lista de dispositivos, regras de automacao). Le devices.json se existir."""
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "devices.json")
     if os.path.exists(path):
         with open(path, encoding="utf-8") as fh:
@@ -595,9 +616,27 @@ def load_devices() -> tuple[list[tuple[str, str, str | None]], dict[str, dict]]:
             {"name": "inversor-59", "ip": "192.168.18.59", "protocol": "modbus_b"},
             {"name": "inversor-106", "ip": "192.168.18.106", "protocol": "pi30"},
         ]
-    devices = [(d["name"], d["ip"], d.get("protocol")) for d in data]
+    devices = [
+        {"name": d["name"], "ip": d["ip"], "protocol": d.get("protocol"),
+         "connect_timeout": d.get("connect_timeout")}
+        for d in data
+    ]
     rules = {d["name"]: d for d in data if "soc_on" in d or "soc_off" in d}
     return devices, rules
+
+
+def write_json_atomic(path: str, value) -> None:
+    """Grava em arquivo temporario e troca de uma vez.
+
+    Sem isso um leitor (a UI) pode pegar o arquivo no meio da escrita e receber JSON
+    truncado, justo quando algum inversor esta offline e o ciclo fica mais lento.
+    """
+    temporary = f"{path}.{os.getpid()}.tmp"
+    with open(temporary, "w", encoding="utf-8") as fh:
+        json.dump(value, fh, indent=1, ensure_ascii=False)
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(temporary, path)
 
 
 
@@ -608,6 +647,8 @@ def main() -> int:
     ap.add_argument("--interval", type=float, default=10.0, help="segundos entre ciclos (padrao 10)")
     ap.add_argument("--http", type=int, default=8080, help="porta da API HTTP (0 desliga)")
     ap.add_argument("--out", default="data/latest.json", help="arquivo JSON de saida")
+    ap.add_argument("--connect-timeout", type=float, default=DEFAULT_CONNECT_TIMEOUT,
+                    help=f"segundos esperando o dongle conectar de volta (padrao {DEFAULT_CONNECT_TIMEOUT:.0f})")
     ap.add_argument("-v", "--verbose", action="store_true")
     ap.add_argument("--version", action="version", version=f"inverter-monitor {__version__}")
     args = ap.parse_args()
@@ -622,6 +663,8 @@ def main() -> int:
         return 0
 
     devices, rules = load_devices()
+    for device in devices:
+        device["connect_timeout"] = device.get("connect_timeout") or args.connect_timeout
     base = os.path.dirname(os.path.abspath(__file__))
     out_path = os.path.join(base, args.out)
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
@@ -629,24 +672,24 @@ def main() -> int:
     if args.once:
         data = poll_once(devices, rules)
         print(json.dumps(data, indent=2, ensure_ascii=False))
-        with open(out_path, "w", encoding="utf-8") as fh:
-            json.dump(data, fh, indent=1, ensure_ascii=False)
+        write_json_atomic(out_path, data)
         return 0 if all(d.get("online") for d in data["devices"].values()) else 1
 
     if args.http:
         start_http(args.http)
 
     automation_state: dict[str, bool] = {}
-    log.info("monitorando %d inversores a cada %.0fs", len(devices), args.interval)
+    last_ok: dict[str, str] = {}
+    log.info("monitorando %d inversores a cada %.0fs (timeout %0.fs por dongle)",
+             len(devices), args.interval, args.connect_timeout)
     try:
         while True:
             t0 = time.time()
-            data = poll_once(devices, rules, automation_state)
+            data = poll_once(devices, rules, automation_state, last_ok)
             with _State.lock:
                 _State.latest = data
                 _State.last_ok = time.time()
-            with open(out_path, "w", encoding="utf-8") as fh:
-                json.dump(data, fh, indent=1, ensure_ascii=False)
+            write_json_atomic(out_path, data)
             for name, d in data["devices"].items():
                 if d.get("online"):
                     b = d.get("battery", {})

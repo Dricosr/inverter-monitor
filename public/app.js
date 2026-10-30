@@ -116,7 +116,12 @@ function renderStatusChips(dashboard) {
   }
 
   const online = dashboard.devices.filter((device) => device.online).length;
-  chips.push(chip(online === dashboard.devices.length ? 'muted' : 'warn', `${online}/${dashboard.devices.length} online`, 'Inversores respondendo na LAN'));
+  const offline = dashboard.devices.filter((device) => !device.online);
+  chips.push(chip(offline.length ? 'warn' : 'muted', `${online}/${dashboard.devices.length} online`,
+    offline.length ? `Sem resposta: ${offline.map((device) => device.name).join(', ')}` : 'Inversores respondendo na LAN'));
+  for (const device of offline.slice(0, 2)) {
+    chips.push(chip('danger', `${device.name} sem resposta`, device.error ?? 'O dongle não respondeu na última leitura'));
+  }
 
   const actions = Object.values(dashboard.execution?.actions ?? {});
   const failures = actions.filter((action) => action.outcome === 'erro').length;
@@ -135,14 +140,20 @@ function renderAutomationCard(dashboard) {
   const acting = activeRules.filter(
     (rule) => dashboard.execution?.actions?.[rule.id]?.mode === 'active',
   ).length;
+  const waiting = activeRules.filter((rule) => {
+    const source = dashboard.devices.find((device) => device.id === rule.sourceDeviceId);
+    return source && source.online === false;
+  }).length;
 
-  elements.automationCard.className = `automation-card ${!enabled ? 'off' : failures ? 'warn' : 'ok'}`;
+  elements.automationCard.className = `automation-card ${!enabled ? 'off' : failures || waiting ? 'warn' : 'ok'}`;
   elements.automationTitle.textContent = enabled ? 'Automação ativa' : 'Automação desligada';
   elements.automationDetail.textContent = !enabled
     ? 'Nenhuma ação é aplicada'
     : failures
       ? (failures === 1 ? '1 ação falhou' : `${failures} ações falharam`)
-      : `${acting} de ${activeRules.length} ${activeRules.length === 1 ? 'regra atuando' : 'regras atuando'}`;
+      : waiting
+        ? `${waiting} ${waiting === 1 ? 'regra sem leitura' : 'regras sem leitura'}`
+        : `${acting} de ${activeRules.length} ${activeRules.length === 1 ? 'regra atuando' : 'regras atuando'}`;
 }
 
 function renderSummary(dashboard) {
@@ -154,7 +165,10 @@ function renderSummary(dashboard) {
 
   elements.summary.innerHTML = [
     summaryCard('Inversores online', `${online}/${dashboard.devices.length}`, 'Dispositivos respondendo na LAN'),
-    summaryCard('SOC médio', average == null ? '—' : `${average}%`, 'Média do estado de carga das baterias'),
+    summaryCard('SOC médio', average == null ? '—' : `${average}%`,
+      online < dashboard.devices.length
+        ? `Média dos ${online} inversores que responderam agora`
+        : 'Média do estado de carga das baterias'),
     summaryCard('Geração solar', formatW(pv), 'Soma da potência fotovoltaica agora'),
     summaryCard('Potência de saída', formatW(output), 'Soma da potência entregue às cargas'),
   ].join('');
@@ -184,10 +198,14 @@ function renderDevices(devices) {
         </div>
         <div class="device-body">
           <div class="soc-top">
-            <div class="soc-value">${soc ?? '—'}<small>% SOC</small></div>
+            <div class="soc-value">${soc ?? '—'}<small>${soc == null ? 'SOC' : '% SOC'}</small></div>
             <div class="device-chips">${chips.join('')}</div>
           </div>
-          <div class="battery-track"><div class="battery-fill${level}" style="width:${soc ?? 0}%"></div></div>
+          <div class="battery-slot">
+            ${device.online
+              ? `<div class="battery-track"><div class="battery-fill${level}" style="width:${soc ?? 0}%"></div></div>`
+              : `<p class="device-alert" title="${escapeHtml(device.error ?? '')}">${escapeHtml(offlineReason(device))}</p>`}
+          </div>
           <div class="metrics">
             ${metric('Potência de saída', formatW(device.output.activePower))}
             ${metric('Geração solar', formatW(device.pv.power))}
@@ -206,6 +224,13 @@ function renderDevices(devices) {
 
 function metric(label, value) {
   return `<div class="metric"><span>${escapeHtml(label)}</span><strong title="${escapeHtml(value)}">${escapeHtml(value)}</strong></div>`;
+}
+
+function offlineReason(device) {
+  const when = device.lastOk ? formatClock(device.lastOk) : null;
+  if (when) return `Sem resposta desde a última leitura, às ${when}`;
+  const age = device.lastOk ? null : 'sem leitura desde que o coletor iniciou';
+  return `Sem resposta · ${age}`;
 }
 
 function renderIntegrations(dashboard) {
@@ -259,12 +284,17 @@ function miningCard({ title, data, rule, action, reducedFoot, governor }) {
   }
 
   const stopped = data.running === false;
-  const reduced = action?.mode === 'active' && action.applied === true;
+  // A contagem real de threads manda mais que o registro da automacao: se alguem
+  // reiniciar o minerador por fora, o painel precisa mostrar a verdade.
+  const threadsReduced = Number.isFinite(data.threads)
+    && Number.isFinite(data.maxThreads)
+    && data.threads < data.maxThreads;
+  const reduced = threadsReduced || (action?.mode === 'active' && action.applied === true);
   const governorAi = governor?.mode === 'ai';
 
   let status;
   if (stopped) status = chip('danger', 'Parada');
-  else if (reduced) status = chip('warn', 'Reduzida por SOC');
+  else if (reduced) status = chip('warn', 'Reduzida');
   else if (governorAi) status = chip('warn', 'Cedendo à IA');
   else status = chip('ok', 'Máxima');
 
@@ -277,8 +307,10 @@ function miningCard({ title, data, rule, action, reducedFoot, governor }) {
 
   const notes = [];
   const intensity = Number(rule?.desiredIntensity);
-  if (reduced && Number.isFinite(intensity)) notes.push(reducedFoot(intensity));
+  if (threadsReduced) notes.push(`${data.threads} de ${data.maxThreads} threads`);
+  else if (reduced && Number.isFinite(intensity)) notes.push(reducedFoot(intensity));
   if (rule && !rule.enabled) notes.push('regra de redução desligada');
+  if (reduced && !rule?.enabled) notes.push('redução fora da automação');
   if (governor?.mode) notes.push(`governador do Gate: ${governor.mode}`);
   if (!notes.length) notes.push('Sem redução por bateria');
 
@@ -331,6 +363,7 @@ function ruleState(rule, execution, source) {
   const when = execution?.updatedAt ? `Atualizado às ${formatClock(execution.updatedAt)}` : '';
   const detail = typeof execution?.detail?.detail === 'string' ? execution.detail.detail : '';
   const title = [when, detail].filter(Boolean).join(' · ') || undefined;
+  const holding = execution?.mode === 'active' && execution.applied;
 
   if (!rule.enabled) return { tone: 'muted', label: 'Desligada', note: 'A regra não executa' };
   if (execution?.outcome === 'erro') {
@@ -339,7 +372,19 @@ function ruleState(rule, execution, source) {
   if (execution?.outcome === 'conflito') {
     return { tone: 'warn', label: 'Conflito', note: `Fila pausada por outro comando · ${where}`, title };
   }
-  if (execution?.mode === 'active' && execution.applied) {
+  // Inversor de referencia fora do ar: sem SOC nao se decide nada, e o estado atual
+  // e mantido de proposito (nao libera nem intensifica as cegas).
+  if (source && source.online === false) {
+    return {
+      tone: 'warn',
+      label: holding ? 'Mantida' : 'Sem leitura',
+      note: holding
+        ? `${name} sem resposta · a redução continua aplicada`
+        : `${name} sem resposta · nenhuma ação aplicada`,
+      title,
+    };
+  }
+  if (holding) {
     return { tone: 'warn', label: activeLabel(rule.action), note: `${activeNote(rule)} · ${where}`, title };
   }
   if (execution?.outcome === 'liberada') {

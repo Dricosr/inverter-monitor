@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { describeNetworkError } from '../domain/networkError.mjs';
 
 async function jsonRequest(url, timeoutMs = 2500, headers = {}) {
   const response = await fetch(url, { headers, signal: AbortSignal.timeout(timeoutMs) });
@@ -6,12 +7,12 @@ async function jsonRequest(url, timeoutMs = 2500, headers = {}) {
   return response.json();
 }
 
-export function createIntegrationStatusService({ gateUrl, ep2XmrigUrl, ep2XmrigConfig, ep2XmrigToken }) {
+export function createIntegrationStatusService({ gateUrl, ep2XmrigUrl, ep2XmrigConfig, ep2XmrigToken, ep2MaxThreads = null }) {
   return {
     async getStatus() {
       const [gate, ep2Mining, aiNodeMining] = await Promise.all([
         gateStatus(gateUrl),
-        ep2MiningStatus(ep2XmrigUrl, ep2XmrigConfig, ep2XmrigToken),
+        ep2MiningStatus(ep2XmrigUrl, ep2XmrigConfig, ep2XmrigToken, ep2MaxThreads),
         aiNodeMiningStatus(gateUrl),
       ]);
       return { gate, ep2Mining, aiNodeMining };
@@ -30,7 +31,7 @@ async function gateStatus(baseUrl) {
       pending: Number.isFinite(gate.pending) ? gate.pending : null,
     };
   } catch (error) {
-    return { online: false, paused: null, error: error.message };
+    return { online: false, paused: null, error: describeNetworkError(error, 'Gate') };
   }
 }
 
@@ -45,7 +46,7 @@ async function aiNodeMiningStatus(baseUrl) {
       running: value?.running === true,
     };
   } catch (error) {
-    return { online: false, error: error.message };
+    return { online: false, error: describeNetworkError(error, 'ai-node') };
   }
 }
 
@@ -61,7 +62,7 @@ export function normalizeAiNodeHashrate(value) {
   };
 }
 
-async function ep2MiningStatus(baseUrl, configPath, configuredToken) {
+async function ep2MiningStatus(baseUrl, configPath, configuredToken, maxThreads = null) {
   let token = configuredToken;
   try {
     if (!token) {
@@ -71,22 +72,29 @@ async function ep2MiningStatus(baseUrl, configPath, configuredToken) {
   } catch (error) {
     return { online: false, error: `configuracao XMRig indisponivel: ${error.message}` };
   }
+
+  const headers = token ? { Authorization: `Bearer ${token}` } : {};
   try {
-    const summary = await jsonRequest(
-      `${baseUrl}/2/summary`,
-      2500,
-      token ? { Authorization: `Bearer ${token}` } : {},
-    );
+    const [summary, backends] = await Promise.all([
+      jsonRequest(`${baseUrl}/2/summary`, 2500, headers),
+      jsonRequest(`${baseUrl}/2/backends`, 2500, headers).catch(() => null),
+    ]);
     return {
       online: true,
       ...normalizeEp2Hashrate(summary?.hashrate?.total),
-      threads: summary?.connection?.threads ?? summary?.resources?.threads ?? null,
+      threads: parseCpuThreads(backends),
+      maxThreads,
     };
   } catch (error) {
-    return { online: false, error: error.message };
+    return { online: false, error: describeNetworkError(error, 'XMRig da EP2') };
   }
 }
 
+export function parseCpuThreads(backends) {
+  const cpu = (Array.isArray(backends) ? backends : []).find((backend) => backend?.type === 'cpu');
+  if (!cpu || !cpu.profile || !Array.isArray(cpu.threads)) return null;
+  return cpu.threads.length;
+}
 export function normalizeEp2Hashrate(total) {
   const windows = Array.isArray(total) ? total.map(Number) : [];
   const usable = (value) => (Number.isFinite(value) && value >= 0 ? value : null);

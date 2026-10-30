@@ -3,9 +3,10 @@ import { StatusNormalizer } from '../domain/statusNormalizer.mjs';
 import { JsonStore } from './jsonStore.service.mjs';
 import { RuleEngine } from '../domain/ruleEngine.mjs';
 import { createIntegrationStatusService } from './integrationStatus.service.mjs';
+import { parseJsonSafe } from '../domain/jsonSafe.mjs';
 
 export class DashboardService {
-  constructor({ devicesFile, snapshotFile, collectorUrl, dashboardFile, gateUrl, ep2XmrigUrl, ep2XmrigConfig, ep2XmrigToken, automationEnabled = false, automationService = null }) {
+  constructor({ devicesFile, snapshotFile, collectorUrl, dashboardFile, gateUrl, ep2XmrigUrl, ep2XmrigConfig, ep2XmrigToken, ep2BaseThreads = null, automationEnabled = false, automationService = null }) {
     this.devicesFile = devicesFile;
     this.snapshotFile = snapshotFile;
     this.collectorUrl = collectorUrl;
@@ -14,7 +15,10 @@ export class DashboardService {
     this.store = new JsonStore(dashboardFile, this.#defaultDashboard());
     this.automationEnabled = automationEnabled;
     this.automationService = automationService;
-    this.integrations = createIntegrationStatusService({ gateUrl, ep2XmrigUrl, ep2XmrigConfig, ep2XmrigToken });
+    this.integrations = createIntegrationStatusService({
+      gateUrl, ep2XmrigUrl, ep2XmrigConfig, ep2XmrigToken,
+      ep2MaxThreads: ep2BaseThreads ?? null,
+    });
   }
 
   async getDashboard() {
@@ -36,7 +40,10 @@ export class DashboardService {
       snapshotJson = await response.json();
       collectorSource = 'collector_api';
     } catch (error) {
-      snapshotJson = typeof snapshot === 'string' ? JSON.parse(snapshot || '{}') : snapshot;
+      // Ultimo recurso: o arquivo gravado pelo coletor pode estar pela metade se o
+      // processo foi encerrado no meio da escrita. Nunca derruba o painel por isso.
+      snapshotJson = parseJsonSafe(snapshot, {});
+      collectorSource = 'snapshot_file';
     }
     const devices = this.normalizer.normalize(snapshotJson, devicesConfig);
     const rules = Array.isArray(userSettings.rules) ? userSettings.rules : [];

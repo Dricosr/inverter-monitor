@@ -3,6 +3,37 @@
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 e versionamento [SemVer](https://semver.org/lang/pt-BR/).
 
+## [1.1.1] — 2026-10-30
+
+### Corrigido
+
+- **Inversor offline derrubava o painel.** `automation-state.json` corrompido (todo em
+  bytes NUL, resíduo de processo encerrado no meio da escrita) fazia `/api/dashboard`
+  responder 500 e a UI ficar vazia. O `JsonStore` agora detecta o arquivo ilegível,
+  guarda uma cópia `*.corrupt-<data>` e recomeça do padrão; o snapshot lido em disco
+  também passa por um parse tolerante.
+- **Um dongle morto atrasava todo o ciclo.** O timeout de conexão era de 25 s fixos,
+  então com 1 de 3 inversores offline o ciclo ia de 15 s para 32 s e os outros dois
+  apareciam atrasados. Agora o padrão é 10 s, configurável por `--connect-timeout` ou
+  por `connect_timeout` em `devices.json`.
+- **Snapshot podia ser lido pela metade.** `data/latest.json` passou a ser gravado em
+  arquivo temporário com `fsync` + `os.replace`.
+- **Card da EP2 mentia quando a automação não sabia do estado.** Ele dizia "Máxima"
+  enquanto o minerador rodava reduzido, porque só olhava o registro da automação. Agora
+  a contagem real de threads vem de `/2/backends` e o card mostra "Reduzida · 3 de 30".
+- Mensagens de rede em inglês (`The operation was aborted due to timeout`) trocadas por
+  texto claro em português para Gate, ai-node e XMRig da EP2.
+- Ícone decorativo da barra lateral interceptava cliques nos botões de navegação.
+
+### Adicionado
+
+- `last_ok` por inversor no snapshot: quando o aparelho não responde, o painel mostra
+  desde quando não há leitura.
+- Estados de regra `Sem leitura` e `Mantida` para o caso de o inversor de referência
+  estar offline: a ação aplicada continua aplicada e nada é decidido sem SOC.
+- Chips de cabeçalho `2/3 online` e `<nome> sem resposta`, com o motivo no tooltip.
+- 5 testes Python do ciclo com inversor morto e 6 testes do `JsonStore`/`parseJsonSafe`.
+
 ## [1.1.0] — 2026-10-29
 
 ### Adicionado

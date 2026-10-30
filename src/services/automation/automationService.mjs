@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { StatusNormalizer } from '../../domain/statusNormalizer.mjs';
+import { parseJsonSafe } from '../../domain/jsonSafe.mjs';
 import { JsonStore } from '../jsonStore.service.mjs';
 import { GateActionExecutor } from './gateActionExecutor.mjs';
 import { Ep2MiningActionExecutor } from './ep2MiningActionExecutor.mjs';
@@ -188,7 +189,7 @@ export class AutomationService {
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       return response.json();
     } catch {
-      return JSON.parse(await readFile(this.snapshotFile, 'utf8').catch(() => '{}'));
+      return parseJsonSafe(await readFile(this.snapshotFile, 'utf8').catch(() => '{}'), {});
     }
   }
 

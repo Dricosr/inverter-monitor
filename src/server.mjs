@@ -30,6 +30,7 @@ const dashboardService = new DashboardService({
   ep2XmrigUrl: config.ep2XmrigUrl,
   ep2XmrigConfig: config.ep2XmrigConfig,
   ep2XmrigToken: config.ep2XmrigToken,
+  ep2BaseThreads: config.ep2MiningBaseThreads,
   automationEnabled: config.automationEnabled,
   automationService,
 });

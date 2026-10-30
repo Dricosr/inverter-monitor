@@ -25,7 +25,7 @@ button { color: inherit; }
   padding: 24px 16px; display: flex; flex-direction: column; background: #0d131a;
 }
 .brand { display: flex; gap: 12px; align-items: center; padding: 0 8px 28px; }
-.brand-mark { width: 38px; height: 38px; display: block; border-radius: 12px; box-shadow: 0 0 18px rgba(94, 230, 168, .16); flex: none; }
+.brand-mark { width: 38px; height: 38px; display: block; border-radius: 12px; box-shadow: 0 0 18px rgba(94, 230, 168, .16); flex: none; pointer-events: none; }
 .brand strong, .brand small { display: block; }
 .brand small { color: var(--muted); margin-top: 3px; font-size: 12px; }
 nav { display: grid; gap: 6px; }
@@ -86,12 +86,14 @@ h2 { margin: 4px 0 0; font-size: 22px; }
 .device-body { padding: 16px 18px 18px; display: grid; gap: 14px; }
 .soc-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 .soc-value { font-size: 42px; font-weight: 750; line-height: 1; letter-spacing: -.03em; }
-.soc-value small { font-size: 15px; color: var(--muted); margin-left: 2px; }
+.soc-value small { font-size: 15px; color: var(--muted); margin-left: 2px; white-space: nowrap; }
 .device-chips { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.battery-slot { display: grid; align-content: center; min-height: 26px; }
 .battery-track { height: 8px; border-radius: 99px; background: #202b37; overflow: hidden; }
 .battery-fill { height: 100%; border-radius: 99px; background: var(--green); transition: width .3s ease; }
 .battery-fill.mid { background: var(--yellow); }
 .battery-fill.low { background: var(--red); }
+.device-alert { margin: 0; color: #f9b0b0; background: #241416; border: 1px solid #4a2b2f; border-radius: 9px; padding: 6px 9px; font-size: 11px; line-height: 1.35; }
 .metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .metric { background: var(--panel-2); border-radius: 9px; padding: 10px 11px; min-width: 0; }
 .metric:last-child:nth-child(odd) { grid-column: span 2; }
@@ -120,7 +122,7 @@ h2 { margin: 4px 0 0; font-size: 22px; }
 .rule-range { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
 .rule-range strong { color: var(--text); }
 .rule-status { display: grid; gap: 6px; justify-items: start; min-width: 0; }
-.rule-note { color: var(--muted); font-size: 12px; }
+.rule-note { color: var(--muted); font-size: 12px; max-width: 280px; }
 .rule-actions { display: flex; gap: 8px; }
 
 dialog { width: min(540px, calc(100vw - 30px)); border: 1px solid var(--line); border-radius: 14px; background: var(--panel); color: var(--text); padding: 22px; }

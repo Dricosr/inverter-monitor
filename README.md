@@ -29,6 +29,7 @@ inversor-106   Battery   SOC  40%   52.2V   811W / carga 12%
 - [Como funciona](#como-funciona)
 - [Painel Node.js](#painel-nodejs)
 - [Leituras ao vivo](#leituras-ao-vivo)
+- [Quando um inversor fica offline](#quando-um-inversor-fica-offline)
 - [O que foi descoberto na rede](#o-que-foi-descoberto-na-rede)
 - [Instalação](#instalação)
 - [Uso pela linha de comando](#uso-pela-linha-de-comando)
@@ -129,6 +130,28 @@ Portanto, ele nunca se torna um segundo coletor concorrente. Entre os recursos:
 O coletor publica novos snapshots a cada 15 segundos em
 `http://127.0.0.1:8080/status`. A UI consulta essa API diretamente a cada 10 segundos.
 O arquivo `data/latest.json` é usado somente como fallback temporário.
+
+## Quando um inversor fica offline
+
+Um dongle pode sumir da rede (sem energia, DHCP novo, Wi-Fi caído). O sistema foi
+feito para continuar útil nesse cenário:
+
+| Camada | Comportamento |
+| --- | --- |
+| Coleta | Timeout curto (`--connect-timeout`, padrão **10 s**) por dongle, então um aparelho morto não trava o ciclo: com 3 inversores e 1 offline o ciclo fica em ~17 s, não 32 s |
+| Coleta | Os demais inversores são lidos normalmente no mesmo ciclo |
+| Snapshot | `online: false`, `error` com o motivo e `last_ok` com a hora da última leitura boa |
+| Snapshot | Gravação atômica (`arquivo.tmp` + `os.replace`): a UI nunca lê JSON pela metade |
+| Painel | Card do inversor mostra `Sem resposta` e, no lugar da barra da bateria, desde quando não há leitura |
+| Painel | Chips no topo: `2/3 online` e `<nome> sem resposta` |
+| Resumo | SOC médio e potências somam **apenas** quem respondeu (o tooltip diz isso) |
+| Automação | Sem SOC da referência, nenhuma decisão é tomada: a regra fica `Sem leitura` e a ação **não** é liberada nem intensificada às cegas |
+| Automação | Se a ação já estava aplicada, ela **continua** aplicada e a regra mostra `Mantida` |
+| Integrações | Gate e mineradores offline aparecem como `Sem resposta` com motivo em português |
+
+O estado da automação fica em `data/automation-state.json`. Se o arquivo for corrompido
+(por exemplo, encerramento forçado no meio da escrita), ele é movido para
+`automation-state.json.corrupt-<data>` e o painel recomeça do padrão em vez de falhar.
 
 ## O que foi descoberto na rede
 
@@ -498,6 +521,9 @@ executores falsos, sem tocar no Gate, no SSH ou no XMRig.
 | `nao conectou de volta em 25s` | Dongle offline, IP mudou ou já conectado a outro servidor | `ping` no IP; confira `devices.json`; rode com `-v` |
 | `nenhum protocolo conhecido respondeu` | Mapa diferente do esperado | `--probe` com `-v` e ajuste o `"protocol"` |
 | `resposta Modbus invalida` | Endereço de registrador fora da faixa ou dongle atropelado | Só leitura; o coletor já repete uma vez com 150 ms de respiro |
+| Inversor com `online: false` | Dongle sem energia, fora do Wi-Fi ou com IP novo | `ping <ip>`; se o ARP não resolver, é o aparelho. Confira `last_ok` no JSON |
+| Ciclo lento (15 s → 30 s) | Dongle morto gastando todo o timeout | Ajuste `--connect-timeout` ou confira `devices.json` |
+| Painel em 500 | Arquivo de estado corrompido | O `JsonStore` já se recupera e guarda `*.corrupt-<data>`; verifique espaço em disco |
 | SOC `0` com todos os campos zerados | Mapa errado respondendo com zeros | A validação de plausibilidade já rejeita isso na detecção |
 | `Geração solar` em `0 W` mesmo de dia | PV desconectado, sem sol ou corrente PV não publicada | Confira a tensão PV no JSON; ver a ressalva em [docs/PROTOCOL.md](docs/PROTOCOL.md#6-modbus-rtu--mapa-b-anenji) |
 | Firewall do Windows pedindo liberação | Conexão de **entrada** na 8899 | Permita para rede privada |

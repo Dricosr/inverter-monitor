@@ -24,6 +24,8 @@ export class StatusNormalizer {
         ip: device.ip ?? settings.ip ?? null,
         protocol: device.protocol ?? settings.protocol ?? null,
         online: device.online !== false,
+        lastOk: device.last_ok ?? null,
+        error: device.error ?? null,
         fresh: Boolean(timestamp),
         timestamp,
         mode: device.mode ?? null,
