@@ -20,6 +20,16 @@ e versionamento [SemVer](https://semver.org/lang/pt-BR/).
 - **Liberação antes da aplicação no mesmo ciclo**: ao religar o host, as regras
   dependentes já podem agir no mesmo tick (antes perdiam um ciclo).
 
+## [1.4.2] — 2026-10-31
+
+### Alterado
+
+- O log do coletor passou a imprimir `-> equipamentos: LIGAR/DESLIGAR` em vez de
+  `-> LIGAR/DESLIGAR`. Era a maior fonte de confusão com as regras do painel: aquele
+  sufixo vem de `soc_on`/`soc_off` do `devices.json` e não tem relação com a automação do
+  painel (que desliga o ai-node, o Gate e a mineração). A documentação do `devices.json`
+  agora diz isso explicitamente.
+
 ## [1.4.0] — 2026-10-31
 
 ### Adicionado

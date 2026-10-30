@@ -57,7 +57,7 @@ DONGLE_UDP_PORT = 58899
 LOCAL_TCP_PORT = 8899  # porta em que o dongle conecta de volta (fixa no firmware)
 CLOUD_RECOVERY_DELAY = 1.5
 
-__version__ = "1.4.1"
+__version__ = "1.4.2"
 
 log = logging.getLogger("inverter")
 
@@ -1337,7 +1337,8 @@ def main() -> int:
                     auto = d.get("automation")
                     suffix = ""
                     if auto is not None:
-                        suffix = "  -> %s" % ("LIGAR" if auto["should_run"] else "DESLIGAR")
+                        suffix = "  -> equipamentos: %s" % (
+                            "LIGAR" if auto["should_run"] else "DESLIGAR")
                     log.info("%-14s %-9s SOC %3s%%  %5.1fV  %-8s%s",
                              name, d["protocol"], b.get("soc"), b.get("voltage", 0),
                              d.get("mode") or "", suffix)

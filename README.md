@@ -470,6 +470,13 @@ Ajuste [`devices.json`](devices.json) se os IPs forem outros:
 lenta). Os valores em `"name"` viram as chaves do JSON e as rotas da API. Reservar IP
 fixo no roteador evita ter de editar o arquivo.
 
+`soc_on`/`soc_off` são **opcionais e independentes das regras do painel**: eles só
+publicam um booleano de conveniência (`automation.should_run`) e aparecem no log do
+coletor como `-> equipamentos: LIGAR/DESLIGAR`. Servem para quem consome `/status` direto
+(ex.: um script que liga/desliga as cargas do escritório). **Nenhuma ação do painel usa
+esses valores** — as regras do painel vivem em `data/dashboard.json` e são editáveis na
+interface. Se não usar esse gancho, pode apagar as duas chaves.
+
 `"pn"` é opcional e serve apenas para exibição: **nenhum comando local devolve o PN**,
 então ele é informado aqui com o mesmo valor que o app do fabricante mostra. O SN, quando
 o próprio aparelho o informa, é lido automaticamente (registradores 186–192 no mapa B).
