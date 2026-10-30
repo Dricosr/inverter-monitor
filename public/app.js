@@ -237,9 +237,13 @@ function renderDevices(devices) {
               !Number.isFinite(device.pv.power) && Number.isFinite(device.pv.powerEstimated),
             ), solarHint(device))}
             ${metric('Carga no inversor', device.loadPercent == null ? '—' : `${device.loadPercent}%`)}
-            ${metric('Tensão da bateria', device.battery.voltage == null ? '—' : `${device.battery.voltage.toFixed(1)} V`)}
             ${metric('Temperatura', device.temperature.inverter == null ? '—' : `${device.temperature.inverter} °C`)}
+            ${metric('Tensão da bateria', device.battery.voltage == null ? '—' : `${device.battery.voltage.toFixed(1)} V`)}
+            ${metric('Carga da bateria', formatAmps(device.battery.chargeCurrent), 'Corrente entrando na bateria')}
+            ${metric('Descarga da bateria', formatAmps(device.battery.dischargeCurrent), 'Corrente saindo da bateria')}
+            ${metric('Tensão PV', device.pv.voltage == null ? '—' : `${device.pv.voltage.toFixed(1)} V`)}
           </div>
+          ${device.online ? balanceLine(device) : ''}
         </div>
       </article>`;
   }).join('');
@@ -254,13 +258,29 @@ function metric(label, value, hint) {
   return `<div class="metric"><span>${escapeHtml(label)}</span><strong${title}>${escapeHtml(value)}</strong></div>`;
 }
 
+function formatAmps(value) {
+  return Number.isFinite(value) ? `${value.toFixed(1)} A` : '—';
+}
+
+/** Mostra a conta quando a potência solar nao foi medida, para dar como conferir. */
+function balanceLine(device) {
+  if (Number.isFinite(device.pv.power)) return '';
+  if (!Number.isFinite(device.pv.powerEstimated)) return '';
+  const out = Number.isFinite(device.output.activePower) ? Math.round(device.output.activePower) : 0;
+  const charging = Number.isFinite(device.battery.chargePower) ? Math.round(device.battery.chargePower) : 0;
+  const discharging = Number.isFinite(device.battery.dischargePower) ? Math.round(device.battery.dischargePower) : 0;
+  const parts = [`saída ${out} W`, `carga ${charging} W`];
+  if (discharging) parts.push(`descarga ${discharging} W`);
+  return `<p class="device-diag">Sem corrente PV neste modelo · balanço: ${escapeHtml(parts.join(' + ').replace('+ descarga', '− descarga'))}</p>`;
+}
+
 function solarHint(device) {
   if (!device.online) return null;
-  if (Number.isFinite(device.pv.power)) return null;
+  if (Number.isFinite(device.pv.power)) return 'Potência medida (tensão × corrente PV)';
   if (!Number.isFinite(device.pv.powerEstimated)) {
     return 'Este modelo não informa a corrente PV';
   }
-  return 'Estimativa: consumo + carga da bateria − descarga (o inversor não informa a corrente PV)';
+  return 'Potência útil medida (saída + carga da bateria). O inversor não informa a corrente PV, então a geração real pode ser maior';
 }
 
 function offlineReason(device) {

@@ -16,6 +16,23 @@ export class StatusNormalizer {
       const soc = this.#finite(battery.soc, null);
       const activePower = this.#finite(output.active_power, null);
       const batteryPower = this.#finite(battery.power, null);
+      const batteryVoltage = this.#finite(battery.voltage, null);
+
+      // `modbus_*` informa corrente unica com sinal; `pi30` separa carga e descarga.
+      const chargeCurrent = this.#finite(battery.current_charge, null)
+        ?? (Number.isFinite(this.#finite(battery.current, null)) && battery.current > 0
+          ? this.#finite(battery.current, null)
+          : null);
+      const dischargeCurrent = this.#finite(battery.current_discharge, null)
+        ?? (Number.isFinite(this.#finite(battery.current, null)) && battery.current < 0
+          ? Math.abs(this.#finite(battery.current, null))
+          : null);
+      const chargePower = Number.isFinite(chargeCurrent) && Number.isFinite(batteryVoltage)
+        ? Math.round(chargeCurrent * batteryVoltage * 10) / 10
+        : null;
+      const dischargePower = Number.isFinite(dischargeCurrent) && Number.isFinite(batteryVoltage)
+        ? Math.round(dischargeCurrent * batteryVoltage * 10) / 10
+        : null;
 
       return {
         id,
@@ -30,9 +47,13 @@ export class StatusNormalizer {
         mode: device.mode ?? null,
         soc,
         battery: {
-          voltage: this.#finite(battery.voltage, null),
+          voltage: batteryVoltage,
           current: this.#finite(battery.current, null),
           power: batteryPower,
+          chargeCurrent,
+          dischargeCurrent,
+          chargePower,
+          dischargePower,
           temperature: this.#finite(battery.temperature, this.#finite(this.#object(device.temperature).battery, null)),
         },
         pv: {
