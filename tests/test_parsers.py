@@ -482,6 +482,36 @@ class TestQuedaParaOMapa0925(unittest.TestCase):
             im.read_pi30_smg(Link())
 
 
+class TestBlocoTruncado(unittest.TestCase):
+    """O dongle as vezes devolve menos registradores do que foi pedido, sem erro."""
+
+    def test_bloco_curto_falha_com_mensagem_clara(self):
+        class Link:
+            def ask(self, fc, payload, timeout=None):  # noqa: ARG002
+                # resposta valida, porem com 2 registradores em vez de 45
+                return bytes([1, 3, 4, 0, 200, 0, 201])
+
+        with self.assertRaises(ValueError) as ctx:
+            im._required_block(Link(), 200, 45, attempts=1)
+        self.assertIn("truncado", str(ctx.exception))
+        self.assertIn("2 de 45", str(ctx.exception))
+
+    def test_tenta_de_novo_antes_de_desistir(self):
+        class Link:
+            def __init__(self):
+                # 1a resposta: cabecalho diz 2 bytes => so 1 registrador (pedimos 2)
+                # 2a resposta: 4 bytes => os 2 registradores
+                self.respostas = [bytes([1, 3, 2, 0, 200]),
+                                  bytes([1, 3, 4, 0, 200, 0, 201])]
+
+            def ask(self, fc, payload, timeout=None):  # noqa: ARG002
+                return self.respostas.pop(0)
+
+        link = Link()
+        self.assertEqual(im._required_block(link, 200, 2), [200, 201])
+        self.assertEqual(link.respostas, [], "usou as duas tentativas")
+
+
 class TestPlausibilidade(unittest.TestCase):
     def test_valores_ok(self):
         self.assertTrue(im._plausible({"battery": {"soc": 50, "voltage": 52.0}}))

@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-10-30T12:09:38-03:00",
+  "timestamp": "2026-10-30T14:40:25-03:00",
   "devices": {
     "anenji-6k2": {
       "ip": "192.168.18.33",
@@ -7,13 +7,13 @@
       "online": true,
       "mode": "Off-Grid",
       "battery": {
-        "soc": 51,
-        "voltage": 54.0,
+        "soc": 92,
+        "voltage": 53.4,
         "current": 0.0,
         "power": 0
       },
       "pv": {
-        "voltage": 29.4,
+        "voltage": 29.9,
         "current": 0.0,
         "power": 0,
         "power_source": "reg 223 (medido)",
@@ -21,7 +21,7 @@
         "inputs": [
           {
             "mppt": 1,
-            "voltage": 29.4,
+            "voltage": 29.9,
             "current": 0.0,
             "power": 0.0,
             "readable": true
@@ -37,21 +37,22 @@
         "voltage": 230.0,
         "current": 0.3,
         "frequency": 59.99,
-        "active_power": 3,
+        "active_power": 1,
         "apparent_power": 69
       },
       "load_percent": 1,
       "temperature": {
-        "dcdc": 32,
-        "inverter": 32
+        "dcdc": 41,
+        "inverter": 39
       },
       "serial": "9253123456789B",
       "pn": "Q0048085649157",
+      "last_ok": "2026-10-30T14:40:13-03:00",
       "automation": {
-        "should_run": false,
+        "should_run": true,
         "soc_on": 60,
         "soc_off": 45,
-        "reason": "histerese"
+        "reason": "soc>=on"
       }
     },
     "inversor-59": {
@@ -62,36 +63,36 @@
       "status_code": 3,
       "serial": "92B32504103913",
       "battery": {
-        "soc": 70,
-        "voltage": 53.3,
-        "current": 35.7,
-        "power": 1902
+        "soc": 58,
+        "voltage": 52.4,
+        "current": -77.0,
+        "power": -4034
       },
       "pv": {
-        "voltage": 227.0,
-        "voltage2": 192.4,
-        "current": 9.8,
-        "power": 2041.0,
+        "voltage": 206.9,
+        "voltage2": 208.1,
+        "current": 15.9,
+        "power": 3317.0,
         "power_source": "reg 302 (medido)",
-        "charging_power": 1902,
-        "charging_current": 33.5,
+        "charging_power": 0,
+        "charging_current": 0.0,
         "mppt_power": [
-          985.0,
-          1072.0
+          1607.0,
+          1722.0
         ],
         "inputs": [
           {
             "mppt": 1,
-            "voltage": 227.0,
-            "current": 4.3,
-            "power": 985.0,
+            "voltage": 206.9,
+            "current": 7.7,
+            "power": 1607.0,
             "readable": true
           },
           {
             "mppt": 2,
-            "voltage": 192.4,
-            "current": 5.5,
-            "power": 1072.0,
+            "voltage": 208.1,
+            "current": 8.2,
+            "power": 1722.0,
             "readable": true
           }
         ]
@@ -102,23 +103,24 @@
       },
       "output": {
         "voltage": 240.0,
-        "current": 1.0,
-        "frequency": 60.02,
-        "active_power": 46,
-        "apparent_power": 239
+        "current": 29.1,
+        "frequency": 60.01,
+        "active_power": 6986,
+        "apparent_power": 6986
       },
-      "load_percent": 2,
+      "load_percent": 63,
       "temperature": {
-        "inverter": 47,
-        "dcdc": 36,
-        "pv": 46
+        "inverter": 58,
+        "dcdc": 44,
+        "pv": 58
       },
       "pn": "I30000251546403679",
+      "last_ok": "2026-10-30T14:40:16-03:00",
       "automation": {
-        "should_run": true,
+        "should_run": false,
         "soc_on": 60,
         "soc_off": 45,
-        "reason": "soc>=on"
+        "reason": "histerese"
       }
     },
     "inversor-106": {
@@ -128,44 +130,44 @@
       "mode": "Battery",
       "serial": "55355535553555",
       "battery": {
-        "soc": 53,
-        "voltage": 53.5,
-        "current_charge": 13.0,
+        "soc": 46,
+        "voltage": 52.8,
+        "current_charge": 14.0,
         "current_discharge": 0.0,
-        "power": 695.5,
-        "voltage_scc": 53.5
+        "power": 739.2,
+        "voltage_scc": 53.0
       },
       "pv": {
         "mppt": 1,
         "mppt_count": 2,
         "mppt_unreadable": [],
-        "voltage": 48.2,
+        "voltage": 47.7,
         "current": 0.0,
-        "power": 1855.0,
-        "dc_balance": 1736.5,
+        "power": 2115.0,
+        "dc_balance": 2107.2,
         "inputs": [
           {
             "mppt": 1,
-            "voltage": 48.2,
+            "voltage": 47.7,
             "current": 0.0,
             "power": 0.0,
             "readable": true
           },
           {
             "mppt": 2,
-            "voltage": 317.4,
-            "current": 5.8,
-            "power": 1855,
+            "voltage": 298.6,
+            "current": 7.1,
+            "power": 2115,
             "readable": true,
             "power_source": "modbus 0925 (reg 4564)",
             "current_source": "derivada (W ÷ V) — o firmware nao expoe a corrente"
           }
         ],
-        "voltage2": 317.4,
-        "power2": 1855,
+        "voltage2": 298.6,
+        "power2": 2115,
         "mppt_power": [
           0.0,
-          1855
+          2115
         ],
         "power_source": "soma dos MPPT (regs 4505 + 4564)"
       },
@@ -174,13 +176,13 @@
         "frequency": 0.0
       },
       "output": {
-        "voltage": 228.6,
+        "voltage": 228.8,
         "frequency": 60.0,
-        "apparent_power": 1303,
-        "active_power": 1041
+        "apparent_power": 1601,
+        "active_power": 1368
       },
-      "load_percent": 14,
-      "bus_voltage": 441,
+      "load_percent": 17,
+      "bus_voltage": 437,
       "temperature": {
         "inverter": 48
       },
@@ -194,6 +196,7 @@
       "modbus_smg": true,
       "pn": "Q0045529822108",
       "serial_trusted": false,
+      "last_ok": "2026-10-30T14:40:23-03:00",
       "automation": {
         "should_run": false,
         "soc_on": 60,

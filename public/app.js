@@ -180,38 +180,56 @@ function renderSummary(dashboard) {
   const average = socValues.length ? Math.round(socValues.reduce((total, value) => total + value, 0) / socValues.length) : null;
   const solar = solarTotal(dashboard.devices);
   const output = dashboard.devices.reduce((total, device) => total + (Number.isFinite(device.output.activePower) ? Math.max(0, device.output.activePower) : 0), 0);
+  const known = solar.stale
+    ? ` — inclui ${solar.stale === 1 ? '1 inversor com o último valor conhecido' : `${solar.stale} inversores com o último valor conhecido`}`
+    : '';
 
   elements.summary.innerHTML = [
     summaryCard('Inversores online', `${online}/${dashboard.devices.length}`, 'Dispositivos respondendo na LAN'),
     summaryCard('SOC médio', average == null ? '—' : `${average}%`,
-      online < dashboard.devices.length
+      (online < dashboard.devices.length
         ? `Média dos ${online} inversores que responderam agora`
-        : 'Média do estado de carga das baterias'),
-    summaryCard(`Geração solar${solar.hiddenInputs ? ' (parcial)' : ''}`, formatW(solar.value), solarHintText(solar)),
-    summaryCard('Potência de saída', formatW(output), 'Soma da potência entregue às cargas'),
+        : 'Média do estado de carga das baterias') + known,
+      staleSummaryCredit(dashboard.devices)),
+    summaryCard(`Geração solar${solar.hiddenInputs ? ' (parcial)' : ''}`, formatW(solar.value),
+      `${solarHintText(solar)}${known}`, solar.stale ? 'inclui leitura anterior' : null),
+    summaryCard('Potência de saída', formatW(output), `Soma da potência entregue às cargas${known}`,
+      staleSummaryCredit(dashboard.devices)),
   ].join('');
+}
+
+/** Nota do resumo quando ele soma valores que vieram do cache. */
+function staleSummaryCredit(devices) {
+  const stale = devices.filter((device) => !device.online || staleAge(device, 'output.active_power') != null);
+  if (!stale.length) return null;
+  return stale.length === 1
+    ? `inclui ${stale[0].name} com a última leitura`
+    : `inclui ${stale.length} inversores com a última leitura`;
 }
 
 /**
  * Soma o PV medido de todas as entradas que os inversores expõem. Entrada que o
- * firmware esconde (multi-MPPT sem `QPIGS2`) deixa o total como piso.
+ * firmware esconde (multi-MPPT sem `QPIGS2`) deixa o total como piso. Inversor sem
+ * resposta entra com o último valor bom e é contado em `stale`, para o resumo não
+ * fingir que o número é do instante atual.
  */
 function solarTotal(devices) {
   let measured = 0;
   let any = false;
   let hiddenInputs = 0;
   let unmeasured = 0;
+  let stale = 0;
   for (const device of devices) {
-    if (!device.online) continue;
     if (Number.isFinite(device.pv.power)) {
       measured += device.pv.power;
       any = true;
+      if (!device.online || staleAge(device, 'pv.power') != null) stale += 1;
     } else {
       unmeasured += 1;
     }
     hiddenInputs += device.pv.inputs.filter((input) => !input.readable).length;
   }
-  return { value: any ? measured : null, hiddenInputs, unmeasured };
+  return { value: any ? measured : null, hiddenInputs, unmeasured, stale };
 }
 
 function solarHintText(solar) {
@@ -231,18 +249,26 @@ function formatPower(value) {
   return formatW(value);
 }
 
-function summaryCard(label, value, hint) {
-  return `<article class="summary-card" title="${escapeHtml(hint)}"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></article>`;
+function summaryCard(label, value, hint, staleLabel = null) {
+  const stale = typeof staleLabel === 'string' && staleLabel.length > 0;
+  return `<article class="summary-card${stale ? ' is-stale' : ''}" title="${escapeHtml(hint)}"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong>${stale ? `<small class="stale-note">${escapeHtml(staleLabel)}</small>` : ''}</article>`;
 }
 
 function renderDevices(devices) {
   elements.devices.innerHTML = devices.map((device) => {
     const soc = Number.isFinite(device.soc) ? device.soc : null;
     const level = soc == null ? '' : soc < 30 ? ' low' : soc < 60 ? ' mid' : '';
+    // Card inteiro vindo do cache: tudo em cinza, uma nota so no aviso do topo.
+    // Leitura parcial: so os campos velhos ficam cinza, cada um com a sua nota.
+    const allStale = wholeStale(device);
+    const opts = (path) => (allStale
+      ? { dimmed: true }
+      : { staleSeconds: staleAge(device, path) });
     const chips = [device.online
       ? chip('muted', device.mode ? (MODE_LABELS[device.mode] ?? device.mode) : 'Modo não informado',
         device.mode ? (MODE_HINTS[device.mode] ?? `Modo informado pelo inversor: ${device.mode}.`) : 'O inversor não informou o modo de operação.')
-      : chip('danger', 'Sem resposta')];
+      : chip('danger', 'Sem resposta', device.error ?? 'O dongle não respondeu na última leitura')];
+    if (device.online && staleAge(device, 'mode') != null) chips.push(chip('warn', 'Leitura parcial'));
     if (soc != null && soc < 30) chips.push(chip('warn', 'Bateria baixa'));
 
     return `
@@ -257,22 +283,23 @@ function renderDevices(devices) {
         </div>
         <div class="device-body">
           <div class="soc-top">
-            <div class="soc-value">${soc ?? '—'}<small>${soc == null ? 'SOC' : '% SOC'}</small></div>
+            <div class="soc-value${allStale ? ' is-stale' : ''}"${allStale ? ' title="Valor da última leitura válida"' : ''}>${soc ?? '—'}<small>${soc == null ? 'SOC' : '% SOC'}</small></div>
             <div class="device-chips">${chips.join('')}</div>
           </div>
           <div class="battery-slot">
-            ${device.online
-              ? `<div class="battery-track"><div class="battery-fill${level}" style="width:${soc ?? 0}%"></div></div>`
-              : `<p class="device-alert" title="${escapeHtml(device.error ?? '')}">${escapeHtml(offlineReason(device))}</p>`}
+            ${device.online || soc != null
+              ? `<div class="battery-track${allStale ? ' is-stale' : ''}"><div class="battery-fill${level}" style="width:${soc ?? 0}%"></div></div>`
+              : ''}
+            ${device.online ? '' : `<p class="device-alert" title="${escapeHtml(device.error ?? '')}">${escapeHtml(offlineReason(device))}</p>`}
           </div>
           <div class="metrics">
-            ${metric('Potência de saída', formatW(device.output.activePower))}
-            ${metric('Carga no inversor', device.loadPercent == null ? '—' : `${device.loadPercent}%`)}
-            ${metric('Temperatura', device.temperature.inverter == null ? '—' : `${device.temperature.inverter} °C`)}
-            ${metric('Temp. PV', device.temperature.pv == null ? '—' : `${device.temperature.pv} °C`, 'Temperatura do módulo fotovoltaico')}
-            ${metric('Tensão da bateria', device.battery.voltage == null ? '—' : `${device.battery.voltage.toFixed(1)} V`)}
-            ${metric(partialLabel('Carga da bateria', device), formatAmps(device.battery.chargeCurrent), currentHint(device, 'Carga da bateria'))}
-            ${metric(partialLabel('Descarga da bateria', device), formatAmps(device.battery.dischargeCurrent), currentHint(device, 'Descarga da bateria'))}
+            ${metric('Potência de saída', formatW(device.output.activePower), null, opts('output.active_power'))}
+            ${metric('Carga no inversor', device.loadPercent == null ? '—' : `${device.loadPercent}%`, null, opts('load_percent'))}
+            ${metric('Temperatura', device.temperature.inverter == null ? '—' : `${device.temperature.inverter} °C`, null, opts('temperature.inverter'))}
+            ${metric('Temp. PV', device.temperature.pv == null ? '—' : `${device.temperature.pv} °C`, 'Temperatura do módulo fotovoltaico', opts('temperature.pv'))}
+            ${metric('Tensão da bateria', device.battery.voltage == null ? '—' : `${device.battery.voltage.toFixed(1)} V`, null, opts('battery.voltage'))}
+            ${metric(partialLabel('Carga da bateria', device), formatAmps(device.battery.chargeCurrent), currentHint(device, 'Carga da bateria'), opts('battery.current_charge'))}
+            ${metric(partialLabel('Descarga da bateria', device), formatAmps(device.battery.dischargeCurrent), currentHint(device, 'Descarga da bateria'), opts('battery.current_discharge'))}
           </div>
           ${pvBlock(device)}
           ${device.online ? balanceLine(device) : ''}
@@ -285,9 +312,20 @@ function renderDevices(devices) {
   });
 }
 
-function metric(label, value, hint) {
-  const title = hint ? ` title="${escapeHtml(hint)}"` : ` title="${escapeHtml(value)}"`;
-  return `<div class="metric"><span>${escapeHtml(label)}</span><strong${title}>${escapeHtml(value)}</strong></div>`;
+/**
+ * `options.staleSeconds` marca o valor como vindo da ultima leitura boa: fica cinza e
+ * ganha a nota com a idade. `options.dimmed` so apaga o texto (card inteiro velho, com
+ * uma unica nota no topo para nao repetir "sem atualizacao" em cada metrica).
+ */
+function metric(label, value, hint, options = {}) {
+  const staleSeconds = options.staleSeconds ?? null;
+  const dimmed = options.dimmed === true;
+  const stale = staleSeconds != null;
+  const title = hint ? ` title="${escapeHtml(hint)}"`
+    : stale ? ` title="Último valor válido · ${escapeHtml(staleNote(staleSeconds))}"`
+      : ` title="${escapeHtml(value)}"`;
+  const note = stale ? `<small class="stale-note">${escapeHtml(staleNote(staleSeconds))}</small>` : '';
+  return `<div class="metric${stale || dimmed ? ' is-stale' : ''}"><span>${escapeHtml(label)}</span><strong${title}>${escapeHtml(value)}</strong>${note}</div>`;
 }
 
 function formatAmps(value) {
@@ -313,15 +351,21 @@ function identityLine(device) {
 /**
  * Entradas PV: um visor por MPPT com tensao, corrente e potencia, mais a soma das
  * entradas legiveis. Entrada que o firmware esconde aparece como "nao exposto" em
- * vez de herdar o numero da outra — e o que fazia a UI mentir.
+ * vez de herdar o numero da outra — e o que fazia a UI mentir. Quando a entrada
+ * existe mas nao veio neste ciclo, o ultimo valor valido fica em cinza com a idade.
  */
 function pvBlock(device) {
-  if (!device.online) return '';
   const inputs = device.pv.inputs;
+  const allStale = wholeStale(device);
+  const totalStale = allStale ? null : staleAge(device, 'pv.power');
+
   if (!inputs.length) {
+    if (!device.online && !Number.isFinite(device.pv.power)) return '';
+    const stale = totalStale ?? (allStale ? device.stale?.ageSeconds ?? null : null);
     return `<div class="pv-block">
-      <div class="pv-head"><span>Entradas PV</span><strong>${escapeHtml(formatW(device.pv.power))}</strong></div>
+      <div class="pv-head${stale != null || allStale ? ' is-stale' : ''}"><span>Entradas PV</span><strong>${escapeHtml(formatW(device.pv.power))}</strong></div>
       <p class="pv-empty">Este inversor não informa quantas entradas PV tem — só a potência total.</p>
+      ${stale != null ? `<small class="stale-note">${escapeHtml(staleNote(stale))}</small>` : ''}
     </div>`;
   }
 
@@ -334,22 +378,27 @@ function pvBlock(device) {
     : `Soma das ${inputs.length} entradas PV`;
 
   return `<div class="pv-block">
-    <div class="pv-head" title="${escapeHtml(hint)}">
+    <div class="pv-head${totalStale != null || allStale ? ' is-stale' : ''}" title="${escapeHtml(totalStale != null ? `Último valor válido · ${staleNote(totalStale)}` : hint)}">
       <span>Entradas PV${hidden ? ` · ${readable.length}/${inputs.length}` : ''}</span>
       <strong>${escapeHtml(formatW(totalLabel))}</strong>
     </div>
-    <div class="mppt-grid">${inputs.map(mpptCard).join('')}</div>
+    ${totalStale != null ? `<small class="stale-note">${escapeHtml(staleNote(totalStale))}</small>` : ''}
+    <div class="mppt-grid">${inputs.map((input) => mpptCard(input, device)).join('')}</div>
   </div>`;
 }
 
-function mpptCard(input) {
+function mpptCard(input, device) {
   const label = `MPPT${input.mppt}`;
+  const staleSeconds = input.staleSeconds ?? null;
   if (!input.readable) {
     const reason = input.reason || 'o firmware não expõe esta entrada';
-    return `<div class="mppt mppt--unknown" title="${escapeHtml(`${label}: ${reason}`)}">
+    const never = !device.online && staleSeconds == null
+      ? 'sem leitura válida desde que o coletor iniciou'
+      : reason;
+    return `<div class="mppt mppt--unknown" title="${escapeHtml(`${label}: ${never}`)}">
       <span>${escapeHtml(label)}</span>
       <strong>não exposto</strong>
-      <small>${escapeHtml(reason)}</small>
+      <small>${escapeHtml(never)}</small>
     </div>`;
   }
   const volts = Number.isFinite(input.voltage) ? `${input.voltage.toFixed(1)} V` : '—';
@@ -359,10 +408,15 @@ function mpptCard(input) {
     : null;
   const detail = amps ? `${volts} · ${amps}` : volts;
   const hint = derived ? `${label}: ${detail} — ${input.currentSource}` : `${label}: ${detail}`;
-  return `<div class="mppt" title="${escapeHtml(hint)}">
+  const note = staleSeconds != null
+    ? `<small class="stale-note">${escapeHtml(staleNote(staleSeconds))}</small>`
+    : '';
+  const title = staleSeconds != null ? `Último valor válido · ${staleNote(staleSeconds)}` : hint;
+  return `<div class="mppt${staleSeconds != null ? ' is-stale' : ''}" title="${escapeHtml(title)}">
     <span>${escapeHtml(label)}</span>
     <strong>${escapeHtml(formatW(input.power))}</strong>
     <small>${escapeHtml(detail)}</small>
+    ${note}
   </div>`;
 }
 
@@ -391,10 +445,13 @@ function balanceLine(device) {
 }
 
 function offlineReason(device) {
+  const seconds = Number.isFinite(device.lastOkAgeSeconds) ? device.lastOkAgeSeconds : null;
   const when = device.lastOk ? formatClock(device.lastOk) : null;
+  if (when && seconds != null) {
+    return `Sem resposta há ${formatAge(seconds)} · os valores são da última leitura, às ${when}`;
+  }
   if (when) return `Sem resposta desde a última leitura, às ${when}`;
-  const age = device.lastOk ? null : 'sem leitura desde que o coletor iniciou';
-  return `Sem resposta · ${age}`;
+  return 'Sem resposta · sem leitura desde que o coletor iniciou';
 }
 
 function renderIntegrations(dashboard) {
@@ -548,6 +605,17 @@ function ruleState(rule, execution, source) {
       title,
     };
   }
+  // Leitura parcial: o inversor respondeu, mas o SOC veio do cache. A automacao
+  // ignora o valor velho, entao a regra fica em espera em vez de agir.
+  const socStale = source ? staleAge(source, 'battery.soc') : null;
+  if (socStale != null) {
+    return {
+      tone: 'warn',
+      label: holding ? 'Mantida' : 'Leitura velha',
+      note: `${name} · SOC ${staleNote(socStale)} · nenhuma ação aplicada`,
+      title,
+    };
+  }
   if (holding) {
     return { tone: 'warn', label: activeLabel(rule.action), note: `${activeNote(rule)} · ${where}`, title };
   }
@@ -592,6 +660,29 @@ function formatAge(seconds) {
   if (seconds < 60) return `${seconds} s`;
   if (seconds < 3600) return `${Math.floor(seconds / 60)} min`;
   return `${Math.floor(seconds / 3600)} h`;
+}
+
+/**
+ * Idade de um valor que veio da ultima leitura boa, em segundos.
+ *
+ * O coletor manda `stale.fields` com o instante de cada folha reaproveitada. Assim o
+ * painel mostra o ultimo valor conhecido em cinza, com a idade ao lado, em vez de
+ * trocar o numero por "nao exposto" — que era mentira quando o dado existia e so
+ * nao foi atualizado neste ciclo.
+ */
+function staleAge(device, path) {
+  const fields = device.stale?.fields;
+  if (!fields || typeof fields !== 'object') return null;
+  return Object.prototype.hasOwnProperty.call(fields, path) ? fields[path] : null;
+}
+
+/** Verdadeiro quando o card inteiro veio do cache (inversor sem resposta). */
+function wholeStale(device) {
+  return device.stale?.whole === true;
+}
+
+function staleNote(seconds) {
+  return `sem atualização há ${formatAge(seconds)}`;
 }
 
 function formatSnapshotTimestamp(timestamp) {

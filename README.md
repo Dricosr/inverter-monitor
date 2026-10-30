@@ -40,6 +40,7 @@ Para deixar os dois invisíveis e subindo com o sistema, use [`deploy/`](deploy)
 - [Os três inversores](#os-três-inversores)
 - [O que cada protocolo entrega](#o-que-cada-protocolo-entrega)
 - [Painel web](#painel-web)
+- [Leitura velha não apaga o painel](#leitura-velha-não-apaga-o-painel)
 - [Automação por SOC](#automação-por-soc)
 - [Quando um inversor fica offline](#quando-um-inversor-fica-offline)
 - [Instalação](#instalação)
@@ -232,6 +233,9 @@ então desenha a tela, então o tempo volta a `Há 0 s`. Durante a espera — o 
   `MPPT2 863 W · 214,5 V · 4,0 A` — mais o somatório no cabeçalho do bloco;
 - entrada que o firmware esconde aparece tracejada como `não exposto`, com o motivo e o
   balanço DC como piso (`≥`), para o número nunca mentir;
+- **valor que não veio neste ciclo fica na tela, em cinza**, com uma nota
+  `sem atualização há N s` logo abaixo — ver [leitura velha não apaga o
+  painel](#leitura-velha-não-apaga-o-painel);
 - barra de bateria colorida por faixa, aviso de bateria baixa abaixo de 30 % e nome
   amigável persistido em `data/dashboard.json`;
 - nada é arredondado para "0": ausência de leitura aparece como `—` com o motivo no
@@ -245,6 +249,39 @@ então desenha a tela, então o tempo volta a `Há 0 s`. Durante a espera — o 
 - estado real dos alvos (fila do Gate, threads do XMRig, CPUQuota do ai-node) e hash
   rate de agora, 1 min e 15 min;
 - último resultado de cada regra visível na linha, com o detalhe técnico no tooltip.
+
+### Leitura velha não apaga o painel
+
+Quando um ciclo não traz uma informação, o painel **não troca o número por
+`não exposto`** — isso era mentira quando o dado existia e só não foi atualizado agora.
+O comportamento padrão, para todas as métricas, todos os MPPTs e todos os inversores:
+
+1. o coletor guarda a última leitura boa de cada inversor (valores **e** o instante de
+   cada folha, em `fields_at`);
+2. no ciclo seguinte, o que faltou é completado com esse valor e publicado em
+   `cache: { at, fields }` — cada folha com o instante real em que foi lida;
+3. o painel mostra o valor **em cinza**, com uma nota `sem atualização há N s` logo
+   abaixo.
+
+Exemplos reais desse mecanismo:
+
+| Situação | O painel mostra |
+| --- | --- |
+| `.106` sem resposta | Card inteiro em cinza, `Sem resposta há 4 min · os valores são da última leitura, às 14:27:49`, e uma nota por MPPT |
+| `.106` respondeu, mas o mapa 0925 não | MPPT1 branco (leu agora) e MPPT2 cinza com `sem atualização há 40 s` |
+| `.59` com o PV2 vindo do cache | `MPPT2` tracejado, valor cinza, idade embaixo; o total do bloco acompanha |
+
+Duas regras para o número não mentir:
+
+- **o total do bloco PV acompanha o que está na tela** — com uma entrada do cache, o
+  total do ciclo somaria só as entradas frescas e contradiria os visores, então ele passa
+  a ser a soma do que está sendo exibido, marcado como velho junto;
+- **os resumos avisam quando incluem leitura antiga** (`inclui MPS 10.2 com a última
+  leitura`) e a automação **ignora** SOC vindo do cache: a regra fica em `Leitura velha`
+  e nenhuma ação é aplicada com base em dado antigo.
+
+`não exposto` continua existindo, mas só quando é verdade: quando o aparelho nunca
+informou aquele campo.
 
 ## Automação por SOC
 
@@ -323,11 +360,12 @@ Um dongle pode sumir da rede (sem energia, DHCP novo, Wi-Fi caído). O sistema c
 | Coleta | Timeout curto (`--connect-timeout`, padrão **10 s**) por dongle: um aparelho morto não trava o ciclo |
 | Coleta | Os demais inversores são lidos normalmente no mesmo ciclo |
 | Snapshot | `online: false`, `error` com o motivo em português e `last_ok` com a hora da última leitura boa |
+| Snapshot | `cache: { at, fields }` devolve o último valor bom de cada campo, com o instante em que foi lido |
 | Snapshot | Gravação atômica (`arquivo.tmp` + `os.replace`): a UI nunca lê JSON pela metade |
-| Painel | O card mostra `Sem resposta` e, no lugar da barra, desde quando não há leitura |
+| Painel | O card continua preenchido, **em cinza**, com `Sem resposta há N s · os valores são da última leitura, às HH:MM:SS` |
 | Painel | Chips `2/3 online` e `<nome> sem resposta`, com o motivo no tooltip |
-| Resumo | SOC médio e potências somam **apenas** quem respondeu (o tooltip diz isso) |
-| Automação | Sem SOC da referência, nenhuma decisão é tomada: a regra fica `Sem leitura` e nada é liberado nem intensificado às cegas |
+| Resumo | SOC médio e potências incluem o último valor conhecido e o tooltip avisa isso |
+| Automação | Sem SOC fresco, nenhuma decisão é tomada: a regra fica `Sem leitura` e nada é liberado nem intensificado às cegas |
 | Automação | Se a ação já estava aplicada, ela **continua** aplicada e a regra mostra `Mantida` |
 | Integrações | Gate, XMRig e ai-node offline aparecem como `Sem resposta` com o motivo |
 
@@ -437,7 +475,10 @@ Cada dispositivo é um objeto. Campos com `*` dependem do protocolo.
 | `serial_trusted`* | bool | `false` quando o firmware devolve um placeholder (caso do `QID` no `pi30`) |
 | `online` | bool | `true` se o ciclo conseguiu ler |
 | `error` | string | Presente apenas quando `online = false` |
-| `last_ok` | string \| null | ISO-8601 da última leitura boa |
+| `last_ok` | string \| null | ISO-8601 da última leitura boa (também quando `online = true`) |
+| `cache` | objeto | Presente quando parte da leitura veio do cache — ver abaixo |
+| `cache.at` | string | ISO-8601 da leitura boa de onde os valores vieram |
+| `cache.fields` | objeto | `caminho → ISO-8601` de **cada folha** reaproveitada (`battery.soc`, `pv.inputs.1.power`…) |
 | `mode` | string \| null | Modo de operação (`Off-Grid`, `Battery`, `Line`, `Standby`…) |
 | `status_code`* | int | Código bruto do modo (`modbus_b`), útil para diagnóstico |
 | `serial`* | string | Serial informado pelo `QID` (`pi30`) — ver `serial_trusted` |
@@ -477,6 +518,34 @@ Cada dispositivo é um objeto. Campos com `*` dependem do protocolo.
 | `temperature.dcdc`* | int | Temperatura do módulo DC (°C) — `modbus_a` (226) e `modbus_b` (281) |
 | `temperature.pv`* | int | Temperatura do painel (°C) — `modbus_b` (305) |
 | `automation` | objeto | Presente quando há `soc_on`/`soc_off` — ver [automação](#automação-por-soc) |
+
+`cache` só aparece quando alguma folha veio de uma leitura anterior — leitura parcial
+(uma entrada PV sem resposta) ou inversor inteiro offline. Exemplo de `.106` com o mapa
+0925 mudo:
+
+```json
+"cache": {
+  "at": "2026-10-30T14:30:08-03:00",
+  "fields": {
+    "pv.inputs.1.voltage": "2026-10-30T14:30:08-03:00",
+    "pv.inputs.1.current": "2026-10-30T14:30:08-03:00",
+    "pv.inputs.1.power":   "2026-10-30T14:30:08-03:00"
+  }
+}
+```
+
+No painel (`/api/dashboard`) o normalizador transforma isso em idades:
+
+```json
+"stale": {
+  "whole": false,
+  "since": "2026-10-30T14:30:08-03:00",
+  "ageSeconds": 40,
+  "fields": { "pv.inputs.1.power": 40, "pv.power": 40 }
+}
+```
+
+`whole: true` significa que o card inteiro veio do cache (inversor sem resposta).
 
 Um exemplo real e completo está em
 [`examples/sample-output.json`](examples/sample-output.json).
@@ -589,10 +658,11 @@ inverter-monitor/
 ## Testes
 
 ```bash
-# parsers, CRC, framing e poll (39 testes, nenhum toca a rede)
-python -m unittest discover -s tests -v
+# parsers, CRC, framing, poll e cache do ultimo valor valido (70 testes, nenhum toca a rede)
+python tests/test_parsers.py
+python tests/test_poll.py
 
-# automação, integrações e normalização do painel (30 testes)
+# automacao, integracoes e normalizacao do painel (41 testes)
 npm test
 ```
 
@@ -614,8 +684,11 @@ executores falsos, sem tocar no Gate, no SSH ou no XMRig.
 | SOC `0` com todos os campos zerados | Mapa errado respondendo com zeros | A validação de plausibilidade já rejeita isso na detecção |
 | `Geração solar 0 W` no `.106` de dia | PV1 sem painéis e o MPPT2 zerado | Confira o visor do MPPT2; se ele disser `não exposto`, o mapa 0925 não respondeu |
 | `Corrente de carga (parcial)` | Um inversor PI30 sem o mapa 0925 | Esperado nesse caso; com o 0925 o rótulo desaparece |
-| `MPPT2 não exposto` no `.106` | Os dois canais falharam neste ciclo | Rode com `-v`; o ASCII é repetido e, se falhar, a leitura segue só com o 0925 |
+| `MPPT2 não exposto` no `.106` | Os dois canais falharam e não há leitura anterior | Rode com `-v`; quando existe leitura anterior o painel mostra o valor em cinza com a idade |
 | `.106` marcado `offline` sem motivo | NAK ou resposta vazia no ASCII eram tratados como falha | Corrigido na 1.3.2: NAK/vazio são repetidos e o 0925 sozinho mantém o inversor online |
+| Valor em cinza com `sem atualização há N s` | O campo não veio neste ciclo e está sendo reaproveitado | Esperado — é o último valor válido; a próxima leitura boa volta a deixá-lo branco |
+| Nota com idade grande que não diminui | O campo não volta a ser lido (registrador instável) | Veja `cache.fields` em `/status`; a idade é contada desde a última leitura real daquele campo |
+| `bloco 277+29 veio truncado` | O dongle devolveu menos registradores que o pedido | Passageiro na maioria dos casos; a leitura é repetida e, se persistir, o card mostra o último valor em cinza |
 | Tempo desde a leitura parecia dobrar | Era o carimbo do início do ciclo | Corrigido na 1.3.1: o `timestamp` marca o fim do ciclo |
 | Temperatura `—` | Modelo não expõe aquele sensor | Esperado; o tooltip da métrica explica |
 | EP2 volta às threads máximas sozinha | `"watch": true` no `config.json` do XMRig | Use `"watch": false` |
@@ -627,8 +700,7 @@ executores falsos, sem tocar no Gate, no SSH ou no XMRig.
 
 - **O app oficial fica sem dados enquanto estamos conectados.** O dongle mantém uma
   conexão por vez. Com `--interval 15`, cada dongle fica conectado localmente apenas
-  durante uma leitura curta e o coletor aguarda **1,5 s** antes do próximo
-  redirecionamento. O app oficial pode atrasar alguns minutos e volta ao normal depois
+  durante uma leitura curta e o coletor aguarda **1,5 s** antes do próximo  redirecionamento. O app oficial pode atrasar alguns minutos e volta ao normal depois
   que o dongle reconecta à nuvem. Não há proxy permanente neste modo.
 - **A porta 8899 é exclusiva.** Só um processo pode usá-la, e o coletor também exige a
   porta HTTP livre: se outra instância já estiver na 8080, a nova encerra em vez de rodar
@@ -636,8 +708,9 @@ executores falsos, sem tocar no Gate, no SSH ou no XMRig.
 - **O `.106` mistura dois protocolos.** O `QPIGS` só carrega o MPPT1 e subnotifica as
   correntes da bateria; o mapa Modbus **0925** (slave 5, 4501+) traz o MPPT2 e as
   correntes reais. O leitor `pi30_smg` usa os dois e tolera o canal ASCII intermitente:
-  NAK e resposta vazia são repetidos e, se persistirem, a leitura segue só com o 0925.
-  Quando isso acontece, modo, temperatura e barramento aparecem como `—`.
+  NAK e resposta vazia são repetidos e, se persistirem, a leitura segue só com o 0925 —
+  modo, temperatura e barramento vêm do cache, em cinza com a idade (ou `—` se nunca
+  foram lidos).
 - `inversor-59` publica modo, carga, temperaturas e PV, mas **não** tensão de rede — os
   registradores 202/203 respondem zero nesse modelo.
 - Em `pi30`, `current_charge` tem 1 decimal e `current_discharge` é inteiro.
@@ -657,10 +730,6 @@ executores falsos, sem tocar no Gate, no SSH ou no XMRig.
       acumulados, mas o registrador 750 não serve (varia para cima e para baixo).
 - [ ] Publicar os alarmes do `.106`: o `QPIWS` responde e o mapa 0925 tem código de erro
       (4529) e de alarme (4530); falta validar o significado de cada bit.
-- [ ] Modo *proxy*: manter nuvem **e** local simultâneos, redirecionando
-      `ess.eybond.com` no DNS do roteador e repassando para o servidor real
-      (ideia de [`powmr-eybond-proxy`]).
-- [ ] Publicação opcional em MQTT com *discovery* para Home Assistant.
 - [ ] Modo *proxy*: manter nuvem **e** local simultâneos, redirecionando
       `ess.eybond.com` no DNS do roteador e repassando para o servidor real
       (ideia de [`powmr-eybond-proxy`]).

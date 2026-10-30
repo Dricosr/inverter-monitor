@@ -3,6 +3,48 @@
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 e versionamento [SemVer](https://semver.org/lang/pt-BR/).
 
+## [1.3.3] — 2026-10-31
+
+### Adicionado
+
+- **Valor desatualizado não vira mais `não exposto`.** Quando um ciclo não trazia uma
+  informação, a UI trocava o número por `não exposto` — mentira quando o dado existia e
+  só não tinha sido atualizado agora. Agora o **último valor válido continua na tela, em
+  cinza**, com uma nota `sem atualização há N s` logo abaixo. Vale para todas as
+  métricas, todos os MPPTs e todos os inversores.
+- **`cache` no snapshot** (`cache.at` + `cache.fields`): o coletor guarda a última
+  leitura boa por inversor e, no ciclo seguinte, completa o que faltou — cada folha com
+  o instante real em que foi lida (`fields_at`). A idade mostrada é a do **dado**, não a
+  do ciclo: um campo que parou de ser lido continua envelhecendo em vez de rejuvenescer.
+- **`stale` no dashboard** (`whole`, `since`, `ageSeconds`, `fields`), consumido pelo
+  painel e por qualquer outro cliente da API.
+- Card inteiro vindo do cache (`whole: true`) fica todo apagado, com uma nota única no
+  aviso do topo: `Sem resposta há 4 min · os valores são da última leitura, às 14:27:49`.
+- Resumos avisam quando somam leitura antiga (`inclui MPS 10.2 com a última leitura`) e
+  ficam com borda tracejada.
+- Regras mostram `Leitura velha` quando o SOC vem do cache.
+
+### Corrigido
+
+- **Automação podia agir sobre SOC antigo.** O `RuleEngine` não checava `online`; com o
+  cache preenchendo o SOC de um inversor sem resposta, uma regra passaria a decidir com
+  dado velho. Agora SOC vindo do cache (ou de inversor offline) resulta em
+  `indeterminate` / `sourceStale: true` e nenhuma ação é aplicada.
+- **Total do bloco PV acompanha o que está na tela:** com uma entrada do cache, o total
+  do ciclo somaria só as entradas frescas e contradiria os visores.
+- **Bloco Modbus truncado agora falha com mensagem clara.** O dongle às vezes devolve
+  menos registradores do que o pedido sem erro de protocolo, e o `IndexError` que isso
+  causava (`list index out of range` no `.59`) não dizia nada sobre a causa. O
+  `_required_block` valida a contagem (`bloco 277+29 veio truncado (2 de 29
+  registradores)`) e repete uma vez antes de derrubar a leitura; `modbus_a` passou a usar
+  o mesmo caminho.
+- `None` no cache não é mais tratado como valor válido: campo nunca lido continua `—` e
+  não ganha idade.
+- `_revive_pv_inputs` comparava a chave errada (`"pv.mppt_unreadable"`) e a entrada do
+  cache continuava listada como ilegível.
+- README: comando de teste que não funcionava (`unittest discover` sem pacote) e bloco
+  duplicado no roadmap.
+
 ## [1.3.2] — 2026-10-31
 
 ### Corrigido

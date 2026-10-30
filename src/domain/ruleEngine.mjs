@@ -1,8 +1,12 @@
 export class RuleEngine {
   evaluate(rule, devices, executionEnabled = false) {
     const source = devices.find((device) => device.id === rule.sourceDeviceId);
-    if (!rule.enabled || !source || !Number.isFinite(source.soc)) {
-      return this.#result(rule, source, null, 'indeterminate', executionEnabled);
+    // SOC vindo do cache nao decide nada: o painel mostra o ultimo valor valido em
+    // cinza, mas a automacao nao pode agir sobre uma leitura velha como se fosse agora.
+    const stale = Boolean(source) && (source.online === false
+      || Object.prototype.hasOwnProperty.call(source.stale?.fields ?? {}, 'battery.soc'));
+    if (!rule.enabled || !source || !Number.isFinite(source.soc) || stale) {
+      return this.#result(rule, source, null, 'indeterminate', executionEnabled, stale);
     }
 
     const soc = source.soc;
@@ -22,7 +26,7 @@ export class RuleEngine {
     return rules.map((rule) => this.evaluate(rule, devices, executionEnabled));
   }
 
-  #result(rule, source, soc, state, executionEnabled) {
+  #result(rule, source, soc, state, executionEnabled, stale = false) {
     return {
       ruleId: rule.id,
       action: rule.action,
@@ -30,6 +34,7 @@ export class RuleEngine {
       sourceDeviceId: rule.sourceDeviceId,
       sourceName: source?.name ?? null,
       sourceSoc: soc,
+      sourceStale: stale,
       state,
       desiredIntensity: rule.desiredIntensity ?? null,
       executionEnabled,

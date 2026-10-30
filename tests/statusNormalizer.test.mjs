@@ -114,8 +114,8 @@ test('normaliza uma entrada PV por MPPT e preserva a ilegivel', () => {
   }, [{ name: 'a' }, { name: 'b' }]);
 
   assert.deepEqual(result[0].pv.inputs, [
-    { mppt: 1, voltage: 213.8, current: 2.6, power: 570, readable: true, reason: null, currentSource: null },
-    { mppt: 2, voltage: 198.5, current: 3.4, power: 685, readable: true, reason: null, currentSource: null },
+    { mppt: 1, voltage: 213.8, current: 2.6, power: 570, readable: true, reason: null, currentSource: null, staleSeconds: null },
+    { mppt: 2, voltage: 198.5, current: 3.4, power: 685, readable: true, reason: null, currentSource: null, staleSeconds: null },
   ]);
   // MPPT2 sem leitura nao pode herdar o valor do MPPT1
   assert.equal(result[1].pv.inputs[1].readable, false);
@@ -188,5 +188,123 @@ test('offline preserva motivo e hora da ultima leitura', () => {
   assert.match(result[0].error, /nao conectou/);
   assert.equal(result[0].lastOk, '2026-10-30T08:55:00-03:00');
   assert.equal(result[0].soc, null);
+  assert.equal(result[0].stale.whole, false, 'sem cache nao ha o que mostrar como velho');
+  assert.deepEqual(result[0].stale.fields, {});
+});
+
+const iso = (secondsAgo) => new Date(Date.now() - secondsAgo * 1000).toISOString();
+
+test('valor do cache fica marcado com a idade, nao vira "nao exposto"', () => {
+  // .106 com o 0925 mudo: o coletor devolve o MPPT2 da ultima leitura boa e diz
+  // que ele veio de 40 s atras. Antes a UI mostrava "nao exposto", que era mentira.
+  const result = new StatusNormalizer().normalize({
+    timestamp: '2026-10-30T13:00:00-03:00',
+    devices: {
+      a: {
+        online: true,
+        last_ok: '2026-10-30T13:00:00-03:00',
+        battery: { soc: 61, voltage: 53.9 },
+        pv: {
+          power: 0,
+          mppt_unreadable: [],
+          inputs: [
+            { mppt: 1, voltage: 45.1, current: 0, power: 0, readable: true },
+            { mppt: 2, voltage: 302.2, current: 3.7, power: 1118, readable: true },
+          ],
+        },
+        output: { active_power: 331 },
+        grid: {},
+        cache: {
+          at: iso(40),
+          fields: {
+            'pv.inputs.1.voltage': iso(40),
+            'pv.inputs.1.current': iso(40),
+            'pv.inputs.1.power': iso(40),
+          },
+        },
+      },
+    },
+  }, [{ name: 'a' }]);
+
+  const mppt2 = result[0].pv.inputs[1];
+  assert.equal(mppt2.readable, true, 'continua legivel: existe valor na tela');
+  assert.equal(mppt2.power, 1118, 'o ultimo valor valido nao e apagado');
+  assert.ok(mppt2.staleSeconds >= 40, `idade medida (${mppt2.staleSeconds})`);
+  assert.equal(result[0].pv.inputs[0].staleSeconds, null, 'MPPT1 veio agora');
+  // O total do ciclo (0 W) somava so a entrada fresca e contradizia o visor.
+  assert.equal(result[0].pv.power, 1118, 'total acompanha o que esta na tela');
+  assert.ok(result[0].stale.fields['pv.power'] >= 40);
+});
+
+test('card inteiro do cache e marcado como todo desatualizado', () => {
+  const result = new StatusNormalizer().normalize({
+    timestamp: '2026-10-30T13:00:00-03:00',
+    devices: {
+      a: {
+        online: false,
+        error: 'TimeoutError: sem conexao',
+        last_ok: iso(95),
+        battery: { soc: 44, voltage: 51.8, current_charge: 0, current_discharge: 6 },
+        pv: { power: 700, inputs: [{ mppt: 1, voltage: 200, current: 3.5, power: 700, readable: true }] },
+        output: { active_power: 400 },
+        grid: {},
+        temperature: { inverter: 41 },
+        cache: {
+          at: iso(95),
+          fields: {
+            'battery.soc': iso(95),
+            'battery.voltage': iso(95),
+            'output.active_power': iso(95),
+            'temperature.inverter': iso(95),
+            'pv.power': iso(95),
+            'pv.inputs.0.power': iso(95),
+          },
+        },
+      },
+    },
+  }, [{ name: 'a' }]);
+
+  assert.equal(result[0].online, false);
+  assert.equal(result[0].stale.whole, true);
+  assert.ok(result[0].stale.ageSeconds >= 95);
+  assert.ok(result[0].lastOkAgeSeconds >= 95, 'a UI mostra ha quanto tempo nao ha resposta');
+  assert.equal(result[0].soc, 44, 'o ultimo SOC valido continua visivel');
+  assert.equal(result[0].temperature.inverter, 41);
+});
+
+test('leitura parcial marca so o campo que veio do cache', () => {
+  const result = new StatusNormalizer().normalize({
+    timestamp: '2026-10-30T13:00:00-03:00',
+    devices: {
+      a: {
+        online: true,
+        last_ok: '2026-10-30T13:00:00-03:00',
+        battery: { soc: 58, voltage: 53.4 },
+        pv: { power: 1200, inputs: [] },
+        output: { active_power: 500 },
+        grid: {},
+        temperature: { inverter: 47 },
+        cache: { at: iso(30), fields: { 'temperature.inverter': iso(30) } },
+      },
+    },
+  }, [{ name: 'a' }]);
+
+  const stale = result[0].stale;
+  assert.equal(stale.whole, false, 'inversor respondeu: o card nao esta todo velho');
+  assert.equal(result[0].stale.fields['output.active_power'], undefined, 'saida veio agora');
+  assert.ok(stale.fields['temperature.inverter'] >= 30);
+});
+
+test('regra nao decide com SOC vindo do cache', async () => {
+  const { RuleEngine } = await import('../src/domain/ruleEngine.mjs');
+  const devices = [{
+    id: 'a', name: 'a', online: false, soc: 20,
+    stale: { whole: true, fields: { 'battery.soc': 120 } },
+  }];
+  const rule = { id: 'r', enabled: true, action: 'gate_pause', sourceDeviceId: 'a', activateBelow: 50, resumeAbove: 60 };
+  const result = new RuleEngine().evaluate(rule, devices, true);
+  assert.equal(result.state, 'indeterminate');
+  assert.equal(result.wouldExecute, false, 'SOC velho nunca dispara acao');
+  assert.equal(result.sourceStale, true);
 });
 

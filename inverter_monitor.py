@@ -39,6 +39,7 @@ API HTTP
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import logging
 import os
@@ -54,7 +55,7 @@ DONGLE_UDP_PORT = 58899
 LOCAL_TCP_PORT = 8899  # porta em que o dongle conecta de volta (fixa no firmware)
 CLOUD_RECOVERY_DELAY = 1.5
 
-__version__ = "1.3.2"
+__version__ = "1.3.3"
 
 log = logging.getLogger("inverter")
 
@@ -213,10 +214,20 @@ def _modbus_block(link: Dongle, start: int, count: int, slave: int = 1) -> list[
 
 
 def _required_block(link: Dongle, start: int, count: int, attempts: int = 2) -> list[int]:
-    """Bloco essencial: tenta de novo uma vez antes de derrubar a leitura inteira."""
+    """Bloco essencial: tenta de novo uma vez antes de derrubar a leitura inteira.
+
+    Confere a contagem: o dongle as vezes devolve a resposta truncada sem erro de
+    protocolo, e o `IndexError` que isso causava la na frente nao dizia nada sobre a
+    causa. Aqui vira uma falha legivel, e a tentativa extra cobre o truncamento
+    passageiro.
+    """
     for attempt in range(1, attempts + 1):
         try:
-            return _modbus_block(link, start, count)
+            regs = _modbus_block(link, start, count)
+            if len(regs) < count:
+                raise ValueError(
+                    f"bloco {start}+{count} veio truncado ({len(regs)} de {count} registradores)")
+            return regs
         except Exception:
             if attempt == attempts:
                 raise
@@ -391,7 +402,7 @@ def parse_modbus_a(r: list[int]) -> dict:
 
 def read_modbus_a(link: Dongle) -> dict:
     """Mapa EG4/Axpert (regs 200-244) + serial em ASCII (186-192)."""
-    data = parse_modbus_a(_modbus_block(link, 200, 45))
+    data = parse_modbus_a(_required_block(link, 200, 45))
     # Bloco alinhado em 180: leituras curtas voltam zeradas nesses dongles.
     data["serial"] = _ascii_from_regs(_safe_block(link, 180, 20)[6:], 7)
     return data
@@ -859,13 +870,116 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
 
 
+# Metadados do ciclo: nao sao leitura do inversor e nao devem ser herdados do cache.
+CACHE_SKIP = {
+    "online", "error", "last_ok", "ip", "protocol", "pn", "serial_trusted",
+    "automation", "cache", "reason",
+}
+
+
+def _cacheable(entry: dict) -> dict:
+    """Copia dos valores de um ciclo bom, sem os campos de controle do coletor."""
+    return {key: copy.deepcopy(value) for key, value in entry.items()
+            if key not in CACHE_SKIP}
+
+
+def _fill_missing(target, source, path_at: dict[str, str], fallback: str,
+                  prefix: str = "") -> dict[str, str]:
+    """Preenche com o ultimo valor bom o que esta faltando agora.
+
+    Devolve `{caminho: instante}` de cada folha que veio do cache, usando `path_at`
+    (quando cada folha foi lida de verdade pela ultima vez) e `fallback` (a leitura
+    boa mais antiga que ainda serve). A recursao desce ate a folha de proposito:
+    assim `temperature.inverter` e `pv.inputs.1.power` sao marcados individualmente,
+    em vez do bloco inteiro — e a idade mostrada na UI e a do dado, nao a do ciclo.
+    """
+    stale: dict[str, str] = {}
+    if isinstance(source, dict):
+        if not isinstance(target, dict):
+            return stale
+        for key, value in source.items():
+            if key in CACHE_SKIP:
+                continue
+            path = f"{prefix}.{key}" if prefix else key
+            if isinstance(value, (dict, list)):
+                if not isinstance(target.get(key), (dict, list)):
+                    target[key] = {} if isinstance(value, dict) else []
+                stale.update(_fill_missing(target[key], value, path_at, fallback, path))
+            elif value is not None and target.get(key) is None:
+                # `None` no cache nao e "ultimo valor valido": nada a mostrar. Marcar
+                # esse caminho como velho faria a UI anunciar idade para um traco.
+                target[key] = copy.deepcopy(value)
+                stale[path] = path_at.get(path, fallback)
+        return stale
+    if isinstance(source, list):
+        if not isinstance(target, list):
+            return stale
+        for index, value in enumerate(source):
+            path = f"{prefix}.{index}"
+            if index >= len(target):
+                target.append(copy.deepcopy(value))
+            stale.update(_fill_missing(target[index], value, path_at, fallback, path))
+        return stale
+    return stale
+
+
+def _leaves(value, prefix: str = ""):
+    """Percorre os valores publicados e devolve `(caminho, valor)` de cada folha."""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key in CACHE_SKIP:
+                continue
+            yield from _leaves(item, f"{prefix}.{key}" if prefix else key)
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            yield from _leaves(item, f"{prefix}.{index}")
+    else:
+        yield prefix, value
+
+
+def _revive_pv_inputs(data: dict, stale: dict[str, str]) -> None:
+    """Entrada PV que voltou do cache passa a valer, mas continua marcada como velha.
+
+    Sem isso o `pi30_smg` publicava MPPT2 `readable: false` (com o motivo "nao
+    exposto") mesmo tendo o ultimo valor bom em maos — era essa a mentira que a UI
+    mostrava.
+    """
+    pv = data.get("pv")
+    if not isinstance(pv, dict):
+        return
+    entradas = pv.get("inputs")
+    if not isinstance(entradas, list):
+        return
+    lidas = []
+    for index, entrada in enumerate(entradas):
+        if not isinstance(entrada, dict):
+            continue
+        tem_valor = any(entrada.get(k) is not None for k in ("voltage", "current", "power"))
+        if tem_valor:
+            entrada["readable"] = True
+            entrada.pop("reason", None)
+            lidas.append(entrada.get("mppt", index + 1))
+    if lidas and "mppt_unreadable" in pv:
+        pv["mppt_unreadable"] = [m for m in pv.get("mppt_unreadable") or [] if m not in lidas]
+    if stale and any(p.startswith("pv.inputs.") for p in stale):
+        pv.pop("power_source", None)
+
+
 def poll_once(devices: list,
               rules: dict[str, dict] | None = None,
               state: dict[str, bool] | None = None,
-              last_ok: dict[str, str] | None = None) -> dict:
+              last_ok: dict[str, str] | None = None,
+              history: dict[str, dict] | None = None) -> dict:
+    """Le todos os inversores e publica o resultado do ciclo.
+
+    `history` guarda, por inversor, a ultima leitura boa (valores + instante). O que
+    falhar neste ciclo nao some do painel: o valor anterior volta marcado em
+    `entry["cache"]`, para a UI mostrar o numero em cinza com a idade ao lado.
+    """
     rules = rules or {}
     state = state if state is not None else {}
     last_ok = last_ok if last_ok is not None else {}
+    history = history if history is not None else {}
     result: dict = {"devices": {}}
     for spec in devices:
         name, ip, proto, connect_timeout = _device_fields(spec)
@@ -897,9 +1011,35 @@ def poll_once(devices: list,
         if entry.get("serial") and str(entry.get("protocol", "")).startswith("pi30"):
             entry["serial_trusted"] = False
 
-        if not entry["online"]:
-            # Mantem a hora da ultima leitura boa para a UI explicar o que aconteceu.
-            entry["last_ok"] = last_ok.get(name)
+        previous = history.get(name)
+        stale: dict[str, str] = {}
+        if entry["online"]:
+            now = last_ok.get(name) or _now_iso()
+            entry["last_ok"] = now
+            # Leitura parcial (ex.: 0925 mudo, entao sem temperatura nem modo) e
+            # completada com o ultimo valor bom — cada folha com a idade real dela.
+            if previous:
+                stale = _fill_missing(entry, previous["values"],
+                                      previous.get("fields_at", {}), previous["at"])
+                _revive_pv_inputs(entry, stale)
+                if stale:
+                    entry["cache"] = {"at": previous["at"], "fields": stale}
+            values = _cacheable(entry)
+            history[name] = {
+                "at": now,
+                "values": values,
+                "fields_at": {path: stale.get(path, now)
+                              for path, value in _leaves(values) if value is not None},
+            }
+        else:
+            # Nada some do painel: o inversor mantem o ultimo valor bom, marcado como
+            # velho, para a UI mostrar em cinza com o tempo sem atualizacao.
+            entry["last_ok"] = last_ok.get(name) or (previous["at"] if previous else None)
+            if previous:
+                stale = _fill_missing(entry, previous["values"],
+                                      previous.get("fields_at", {}), previous["at"])
+                _revive_pv_inputs(entry, stale)
+                entry["cache"] = {"at": previous["at"], "fields": stale}
 
         rule = rules.get(name)
         if rule and entry.get("online"):
@@ -928,7 +1068,8 @@ def run_cycle(devices: list,
               rules: dict[str, dict] | None,
               state: dict[str, bool],
               last_ok: dict[str, str],
-              out_path: str | None = None) -> dict:
+              out_path: str | None = None,
+              history: dict[str, dict] | None = None) -> dict:
     """Executa um ciclo e publica o resultado.
 
     Fica atras de `_State.cycle_lock` porque o dongle so aceita uma conexao por vez:
@@ -936,7 +1077,7 @@ def run_cycle(devices: list,
     "porta 8899 ocupada".
     """
     with _State.cycle_lock:
-        data = poll_once(devices, rules, state, last_ok)
+        data = poll_once(devices, rules, state, last_ok, history)
         with _State.lock:
             _State.latest = data
             _State.last_ok = time.time()
@@ -1114,7 +1255,8 @@ def main() -> int:
 
     automation_state: dict[str, bool] = {}
     last_ok: dict[str, str] = {}
-    _State.cycle = lambda: run_cycle(devices, rules, automation_state, last_ok, out_path)
+    history: dict[str, dict] = {}  # ultima leitura boa por inversor, para a UI nao apagar tudo
+    _State.cycle = lambda: run_cycle(devices, rules, automation_state, last_ok, out_path, history)
     log.info("monitorando %d inversores a cada %.0fs (timeout %0.fs por dongle)",
              len(devices), args.interval, args.connect_timeout)
     try:
