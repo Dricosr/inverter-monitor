@@ -128,6 +128,27 @@ class TestParseModbusB(unittest.TestCase):
         self.assertIsNone(d["load_percent"])
         self.assertIsNone(d["temperature"]["inverter"])
 
+    def test_potencia_pv_usa_o_registrador_medido(self):
+        # 302 e a potencia PV total medida; a soma dos MPPTs fica de reserva
+        pv = {"pv1": 220.1, "pv2": 211.4, "pv1_current": 2.4, "pv2_current": 3.2,
+              "pv1_power": 530, "pv2_power": 684, "total_power": 1213}
+        d = im.parse_modbus_b(self.BAT, self.OUT, self.GRID, self.AC, pv)
+        self.assertEqual(d["pv"]["power"], 1213.0)
+        self.assertIn("302", d["pv"]["power_source"])
+
+    def test_potencia_pv_soma_quando_nao_ha_registrador(self):
+        pv = {"pv1": 220.1, "pv2": 211.4, "pv1_power": 530, "pv2_power": 684}
+        d = im.parse_modbus_b(self.BAT, self.OUT, self.GRID, self.AC, pv)
+        self.assertEqual(d["pv"]["power"], 1214.0)
+        self.assertIn("soma", d["pv"]["power_source"])
+
+    def test_energia_e_carga_do_pv_medidos(self):
+        pv = {"pv1": 220.1, "pv2": 211.4, "pv1_power": 530, "pv2_power": 684,
+              "charging_power": 1042, "charging_current": 19.5}
+        d = im.parse_modbus_b(self.BAT, self.OUT, self.GRID, self.AC, pv)
+        self.assertEqual(d["pv"]["charging_power"], 1042)
+        self.assertAlmostEqual(d["pv"]["charging_current"], 19.5)
+
     def test_reg_recorta_o_bloco(self):
         self.assertEqual(im._reg([10, 20, 30], 100, 101), 20)
         self.assertIsNone(im._reg([10, 20, 30], 100, 99))
@@ -241,7 +262,9 @@ class TestModbusSmg(unittest.TestCase):
         self.assertEqual(merged["pv"]["power2"], 568)
         self.assertEqual(merged["pv"]["power"], 568.0, "PV1=0, entao o total e o PV2")
         self.assertTrue(merged["pv"]["inputs"][1]["readable"])
-        self.assertEqual(merged["pv"]["inputs"][1]["current"], None)
+        # O mapa 0925 nao tem corrente do MPPT2: ela e derivada de W / V.
+        self.assertAlmostEqual(merged["pv"]["inputs"][1]["current"], 1.9)
+        self.assertIn("derivada", merged["pv"]["inputs"][1]["current_source"])
         self.assertEqual(merged["protocol"], "pi30_smg")
         self.assertEqual(merged["smg"]["cpu_version"], 15202)
 

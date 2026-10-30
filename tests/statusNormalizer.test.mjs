@@ -114,8 +114,8 @@ test('normaliza uma entrada PV por MPPT e preserva a ilegivel', () => {
   }, [{ name: 'a' }, { name: 'b' }]);
 
   assert.deepEqual(result[0].pv.inputs, [
-    { mppt: 1, voltage: 213.8, current: 2.6, power: 570, readable: true, reason: null },
-    { mppt: 2, voltage: 198.5, current: 3.4, power: 685, readable: true, reason: null },
+    { mppt: 1, voltage: 213.8, current: 2.6, power: 570, readable: true, reason: null, currentSource: null },
+    { mppt: 2, voltage: 198.5, current: 3.4, power: 685, readable: true, reason: null, currentSource: null },
   ]);
   // MPPT2 sem leitura nao pode herdar o valor do MPPT1
   assert.equal(result[1].pv.inputs[1].readable, false);
@@ -144,6 +144,32 @@ test('PN entra sempre; SN so quando o aparelho informa de verdade', () => {
   assert.equal(result[2].pn, 'Q0048085649157', 'devices.json serve de fonte do PN');
   assert.equal(result[2].serial, null);
   assert.equal(result[2].serialTrusted, false);
+});
+
+test('corrente derivada chega marcada como tal', () => {
+  const result = new StatusNormalizer().normalize({
+    timestamp: '2026-10-30T11:40:00-03:00',
+    devices: {
+      a: {
+        online: true,
+        battery: { soc: 51, voltage: 53.3 },
+        pv: {
+          power: 1127,
+          inputs: [
+            { mppt: 1, voltage: 45.2, current: 0, power: 0, readable: true },
+            { mppt: 2, voltage: 302.2, current: 3.7, power: 1127, readable: true,
+              current_source: 'derivada (W ÷ V) — o firmware nao expoe a corrente' },
+          ],
+        },
+        output: {},
+        grid: {},
+      },
+    },
+  }, [{ name: 'a' }]);
+
+  assert.equal(result[0].pv.inputs[1].current, 3.7);
+  assert.match(result[0].pv.inputs[1].currentSource, /derivada/);
+  assert.equal(result[0].pv.inputs[0].currentSource, null, 'leitura direta nao e marcada');
 });
 
 test('offline preserva motivo e hora da ultima leitura', () => {

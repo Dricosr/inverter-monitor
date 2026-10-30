@@ -54,7 +54,7 @@ DONGLE_UDP_PORT = 58899
 LOCAL_TCP_PORT = 8899  # porta em que o dongle conecta de volta (fixa no firmware)
 CLOUD_RECOVERY_DELAY = 1.5
 
-__version__ = "1.2.0"
+__version__ = "1.2.1"
 
 log = logging.getLogger("inverter")
 
@@ -274,6 +274,8 @@ def parse_modbus_smg(regs: list[int]) -> dict:
         "pv1_power": reg(4505),
         "pv2": _scaled(reg(4563), 10),
         "pv2_power": reg(4564),
+        "grid_voltage": _scaled(reg(4502), 10),
+        "grid_frequency": _scaled(reg(4503), 10),
         "battery_voltage": _scaled(reg(4506), 10),
         "soc": reg(4507),
         "charge_current": reg(4508),
@@ -350,6 +352,9 @@ def _signed_or_none(value: int | None) -> int | None:
 def parse_modbus_a(r: list[int]) -> dict:
     """Decodifica o bloco de 45 registradores (200-244) do mapa EG4/Axpert."""
     g = lambda reg: r[reg - 200]
+    pv_voltage = round(s16(g(219)) / 10, 1)
+    pv_current = round(s16(g(220)) / 10, 1)
+    pv_power = s16(g(223))
     return {
         "protocol": "modbus_a",
         "mode": MODES_MODBUS_A.get(g(201), f"desconhecido({g(201)})"),
@@ -360,9 +365,12 @@ def parse_modbus_a(r: list[int]) -> dict:
             "power": s16(g(217)),
         },
         "pv": {
-            "voltage": round(s16(g(219)) / 10, 1),
-            "current": round(s16(g(220)) / 10, 1),
-            "power": s16(g(223)),
+            "voltage": pv_voltage,
+            "current": pv_current,
+            "power": pv_power,
+            "power_source": "reg 223 (medido)",
+            "mppt_count": 1,
+            "inputs": [_pv_input(1, pv_voltage, pv_current, float(pv_power))],
         },
         "grid": {
             "voltage": round(s16(g(202)) / 10, 1),
@@ -382,8 +390,11 @@ def parse_modbus_a(r: list[int]) -> dict:
 
 
 def read_modbus_a(link: Dongle) -> dict:
-    """Mapa EG4/Axpert (regs 200-244)."""
-    return parse_modbus_a(_modbus_block(link, 200, 45))
+    """Mapa EG4/Axpert (regs 200-244) + serial em ASCII (186-192)."""
+    data = parse_modbus_a(_modbus_block(link, 200, 45))
+    # Bloco alinhado em 180: leituras curtas voltam zeradas nesses dongles.
+    data["serial"] = _ascii_from_regs(_safe_block(link, 180, 20)[6:], 7)
+    return data
 
 
 def _reg(block: list[int], start: int, reg: int) -> int | None:
@@ -415,6 +426,11 @@ def read_modbus_b(link: Dongle) -> dict:
         "pv2_current": _scaled(_reg(pv2, 389, 390), 10),
         "pv1_power": _reg(acpv, 342, 353),
         "pv2_power": _reg(pv2, 389, 391),
+        # 302 e a potencia PV total medida pelo inversor (soma dos MPPTs conferida).
+        "total_power": _reg(bat, 277, 302),
+        # 303/304 sao a potencia e a corrente de carga vindas do PV, medidas.
+        "charging_power": _reg(bat, 277, 303),
+        "charging_current": _scaled(_reg(bat, 277, 304), 10),
     }
     load = _reg(acpv, 342, 350)
     return parse_modbus_b(
@@ -461,6 +477,10 @@ def parse_modbus_b(bat: list[int], out: list[int], grid: list[int],
         pv2_p = _pv_power(pv2_v, pv2_i)
     powers = [p for p in (pv1_p, pv2_p) if p is not None]
     currents = [i for i in (pv1_i, pv2_i) if i is not None]
+    # 302 e medido pelo inversor e ja bate com a soma; a soma fica so de reserva.
+    total_power = pv.get("total_power")
+    if total_power is None and powers:
+        total_power = round(sum(powers), 1)
 
     return {
         "protocol": "modbus_b",
@@ -477,7 +497,10 @@ def parse_modbus_b(bat: list[int], out: list[int], grid: list[int],
             "voltage": pv1_v,
             "voltage2": pv2_v,
             "current": round(sum(currents), 1) if currents else None,
-            "power": round(sum(powers), 1) if powers else None,
+            "power": float(total_power) if total_power is not None else None,
+            "power_source": "reg 302 (medido)" if pv.get("total_power") is not None else "soma dos MPPT",
+            "charging_power": pv.get("charging_power"),
+            "charging_current": pv.get("charging_current"),
             "mppt_power": [pv1_p, pv2_p] if powers else None,
             "inputs": [_pv_input(1, pv1_v, pv1_i, pv1_p),
                        _pv_input(2, pv2_v, pv2_i, pv2_p)],
@@ -624,11 +647,21 @@ def merge_modbus_smg(data: dict, smg: dict) -> dict:
     pv = data.setdefault("pv", {})
     inputs = pv.get("inputs") or []
     if len(inputs) >= 2:
-        inputs[1] = _pv_input(2, smg.get("pv2"), None, smg.get("pv2_power"))
+        pv2v = smg.get("pv2")
+        pv2p = smg.get("pv2_power")
+        # O mapa termina em 4564 e nao tem registrador de corrente do MPPT2: a
+        # corrente so existe dividindo a potencia pela tensao (as duas medidas).
+        pv2i = None
+        current_source = None
+        if pv2v and pv2p is not None and pv2v > 0:
+            pv2i = round(pv2p / pv2v, 1)
+            current_source = "derivada (W ÷ V) — o firmware nao expoe a corrente"
+        inputs[1] = _pv_input(2, pv2v, pv2i, pv2p)
         inputs[1]["power_source"] = "modbus 0925 (reg 4564)"
+        inputs[1]["current_source"] = current_source
         pv["inputs"] = inputs
-        pv["voltage2"] = smg.get("pv2")
-        pv["power2"] = smg.get("pv2_power")
+        pv["voltage2"] = pv2v
+        pv["power2"] = pv2p
         pv["mppt_unreadable"] = []
         pv["mppt_count"] = 2
         pv["mppt_power"] = [inputs[0].get("power"), inputs[1].get("power")]
@@ -636,6 +669,13 @@ def merge_modbus_smg(data: dict, smg: dict) -> dict:
                     if v is not None]
         if measured:
             pv["power"] = round(sum(measured), 1)
+            pv["power_source"] = "soma dos MPPT (regs 4505 + 4564)"
+
+    grid = data.setdefault("grid", {})
+    if smg.get("grid_voltage") is not None:
+        grid["voltage"] = smg["grid_voltage"]
+    if smg.get("grid_frequency") is not None:
+        grid["frequency"] = smg["grid_frequency"]
 
     battery = data.setdefault("battery", {})
     voltage = smg.get("battery_voltage")

@@ -345,9 +345,13 @@ function mpptCard(input) {
     </div>`;
   }
   const volts = Number.isFinite(input.voltage) ? `${input.voltage.toFixed(1)} V` : '—';
-  const amps = Number.isFinite(input.current) ? `${input.current.toFixed(1)} A` : null;
+  const derived = Boolean(input.currentSource);
+  const amps = Number.isFinite(input.current)
+    ? `${derived ? '≈' : ''}${input.current.toFixed(1)} A`
+    : null;
   const detail = amps ? `${volts} · ${amps}` : volts;
-  return `<div class="mppt" title="${escapeHtml(`${label}: ${detail}`)}">
+  const hint = derived ? `${label}: ${detail} — ${input.currentSource}` : `${label}: ${detail}`;
+  return `<div class="mppt" title="${escapeHtml(hint)}">
     <span>${escapeHtml(label)}</span>
     <strong>${escapeHtml(formatW(input.power))}</strong>
     <small>${escapeHtml(detail)}</small>

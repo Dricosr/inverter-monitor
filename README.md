@@ -3,7 +3,7 @@
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Node.js](https://img.shields.io/badge/node.js-20%2B-5FA04E)
 ![Dependências](https://img.shields.io/badge/depend%C3%AAncias-nenhuma-brightgreen)
-![Testes](https://img.shields.io/badge/testes-83%20passando-brightgreen)
+![Testes](https://img.shields.io/badge/testes-87%20passando-brightgreen)
 ![Licença](https://img.shields.io/badge/licen%C3%A7a-MIT-green)
 ![Plataforma](https://img.shields.io/badge/plataforma-windows%20%7C%20linux%20%7C%20macos-lightgrey)
 
@@ -137,11 +137,12 @@ card do painel diz de qual entrada o número veio.
 | Tensão da bateria | ✅ | ✅ | ✅ |
 | Corrente / potência da bateria | ✅ | ✅ | ✅ |
 | PV — tensão por MPPT | 1 entrada | ✅ **MPPT1 e MPPT2** | ✅ **MPPT1 e MPPT2** |
-| PV — corrente por MPPT | 1 entrada | ✅ **MPPT1 e MPPT2** | MPPT1 apenas |
+| PV — corrente por MPPT | 1 entrada | ✅ **MPPT1 e MPPT2** | MPPT1 direto; MPPT2 derivada |
 | PV — potência por MPPT | 1 entrada | ✅ **medida por MPPT** | ✅ **medida por MPPT** |
 | Temperatura do inversor | ✅ | ✅ (reg 231) | ✅ |
 | Temperatura do painel / módulo DC | ✅ DC | ✅ ambos | — |
-| Rede (tensão/frequência) | ✅ | — | — |
+| Rede (tensão/frequência) | ✅ | — | ✅ (0925) |
+| Serial (SN) lido do aparelho | ✅ | ✅ | — (o `QID` mente) |
 
 Cada entrada PV vira um objeto em **`pv.inputs`** e o painel desenha **um visor por
 MPPT**, com o somatório no cabeçalho do bloco. Entrada que o firmware não expõe aparece
@@ -416,8 +417,12 @@ Cada dispositivo é um objeto. Campos com `*` dependem do protocolo.
 | `pv.voltage` | float \| null | Tensão PV do **MPPT1** (V) |
 | `pv.voltage2`* | float | Tensão do **MPPT2** (`modbus_b` e `pi30_smg`) |
 | `pv.current`* | float | Corrente PV (A) |
-| `pv.power`* | float \| null | Potência PV (W) — **soma das entradas legíveis**; no `pi30` só o MPPT1 |
+| `pv.power`* | float \| null | Potência PV (W) — medida; no `.59` vem do reg 302, no `.106` é a soma dos MPPTs |
+| `pv.power_source`* | string | De onde veio o total (`reg 302 (medido)`, `soma dos MPPT`…) |
+| `pv.charging_power`* | float | Potência de carga vinda do PV (W) — reg 303 (`modbus_b`) |
+| `pv.charging_current`* | float | Corrente de carga vinda do PV (A) — reg 304 (`modbus_b`) |
 | `pv.inputs`* | objeto[] | **Uma entrada por MPPT** com `mppt`, `voltage`, `current`, `power` e `readable` |
+| `pv.inputs[].current_source`* | string \| null | Preenchido quando a corrente é derivada (só o MPPT2 do `.106`) |
 | `pv.mppt_power`* | float[] \| null | Potência de cada entrada PV em W (`modbus_b`) |
 | `pv.mppt`* | int | Entrada que os campos acima descrevem (`pi30`: sempre `1`) |
 | `pv.mppt_count`* | int | Quantas entradas o modelo tem (`pi30`: `2`) |
@@ -607,8 +612,8 @@ executores falsos, sem tocar no Gate, no SSH ou no XMRig.
 
 - [ ] Expor tensão/frequência de rede no `.59` caso o firmware passe a responder os
       registradores 202/203.
-- [ ] Expor os contadores de energia do mapa 0925 (bloco 4554–4561) — os valores ainda
-      não foram decodificados.
+- [ ] Achar o contador de energia do `.59`: a nuvem mostra 3,89 kWh do dia e 5596 kWh
+      acumulados, mas o registrador 750 não serve (varia para cima e para baixo).
 - [ ] Publicar os alarmes do `.106`: o `QPIWS` responde e o mapa 0925 tem código de erro
       (4529) e de alarme (4530); falta validar o significado de cada bit.
 - [ ] Modo *proxy*: manter nuvem **e** local simultâneos, redirecionando
@@ -638,4 +643,5 @@ executores falsos, sem tocar no Gate, no SSH ou no XMRig.
 ## Licença
 
 MIT — veja [LICENSE](LICENSE).
+
 

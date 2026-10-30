@@ -3,6 +3,34 @@
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 e versionamento [SemVer](https://semver.org/lang/pt-BR/).
 
+## [1.2.1] — 2026-10-31
+
+### Alterado
+
+- **O total de PV do `.59` passou a ser lido, não somado.** O registrador **302** é a
+  potência PV total medida pelo inversor (confere com 353+391 em todas as amostras) e
+  agora é a fonte de `pv.power`; a soma fica só de reserva. `pv.power_source` diz de
+  onde veio o número.
+- **`pv.charging_power` (303) e `pv.charging_current` (304)** passaram a ser publicados:
+  são a potência e a corrente de carga vindas do PV, medidas pelo aparelho.
+- **Rede do `.106` vem do mapa 0925** (4502/4503) em vez do PI30.
+
+### Adicionado
+
+- **SN lido do `.33`**: os registradores 186–192 guardam o serial em ASCII
+  (`9253123456789B`, o mesmo da nuvem) e o cartão passou a exibir.
+- **Visor de MPPT no `.33`**: o mapa A tem uma entrada PV só; antes o cartão caía no
+  aviso "não informa quantas entradas PV tem".
+- **Corrente do MPPT2 do `.106`**: o mapa 0925 não tem esse registrador (termina em
+  4564), então a corrente é derivada de `W ÷ V` e aparece como **`≈`**, com o motivo no
+  tooltip. É a única grandeza calculada do painel.
+
+### Investigado e descartado
+
+- Registrador **750** do `.59` (≈3810): parecia energia diária, mas **oscila para cima e
+  para baixo** (3814 → 3806 → 3813), então não é contador. Ficou fora do payload; a
+  energia diária da nuvem (3,89 kWh) continua sem registrador identificado.
+
 ## [1.2.0] — 2026-10-31
 
 ### Adicionado

@@ -111,6 +111,7 @@ export class StatusNormalizer {
         power: this.#finite(entry.power, null),
         readable: entry.readable !== false,
         reason: typeof entry.reason === 'string' ? entry.reason : null,
+        currentSource: typeof entry.current_source === 'string' ? entry.current_source : null,
       }));
   }
 

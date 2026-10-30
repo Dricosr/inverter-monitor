@@ -254,6 +254,10 @@ Usado por `.33`. Leitura em bloco único de 45 registradores a partir de 200
 | **229** | **SOC** | % |
 | 232 | Corrente da bateria | ÷10 A, positivo = carregando |
 | 643 | Potência nominal | W (**6200** nesta unidade) |
+| **186–192** | **SN em ASCII** (14 caracteres) | 2 chars por registrador | — |
+
+> O SN vem do bloco alinhado `180+20` (regs 186–192), igual ao mapa B: no `.33` a
+> leitura devolve `9253123456789B`, o mesmo SN que o app do fabricante mostra.
 
 Captura real (regs 200–239):
 
@@ -284,7 +288,9 @@ requisição é uma ida e volta pelo dongle.
 | 279 | Potência da bateria | W (signed) | 303 repete o valor |
 | **280** | **SOC** | % | — |
 | 281 | Temperatura do módulo DC | °C | nuvem 34 °C ↔ local 34 °C |
-| **302** | **Potência PV total** (os dois MPPTs) | W | 442 ↔ 353+391 = 440 |
+| **302** | **Potência PV total** (os dois MPPTs) | W | 1213 ↔ 353+391 = 1214 |
+| **303** | **Potência de carga vinda do PV** | W | igual à potência da bateria (279) |
+| **304** | **Corrente de carga vinda do PV** | ÷10 A | 19,5 A ↔ bateria 19,6 A |
 | 305 | Temperatura do módulo PV | °C | nuvem 39–40 °C ↔ local 39–41 °C |
 | 342 | Tensão de saída | ÷10 V | 346 repete o valor |
 | **350** | **Carga do inversor** | % da potência nominal | — |
@@ -301,19 +307,27 @@ requisição é uma ida e volta pelo dongle.
 > dongle; só blocos maiores e alinhados (`180+20`) devolvem o serial. As leituras de
 > produção usam `180+20` justamente por isso.
 
-A potência PV vem do **registrador medido** (353 e 391) e cai para `V × I` só quando
-o firmware não informa a potência. O total publicado é a soma das duas entradas, e
-`pv.inputs` traz cada entrada separada:
+A potência de cada entrada vem do **registrador medido** (353 e 391) e só cai para
+`V × I` se o firmware não informar a potência. O total publicado usa **302** (medido
+pelo inversor, e confere com a soma); a soma fica de reserva. `pv.inputs` traz cada
+entrada separada, com tensão, corrente e potência todas medidas:
 
 ```json
 "pv": {
-  "power": 1628.0,
+  "power": 1232.0,
+  "power_source": "reg 302 (medido)",
+  "charging_power": 1042,
+  "charging_current": 19.5,
   "inputs": [
-    { "mppt": 1, "voltage": 211.0, "current": 3.6, "power": 765.0, "readable": true },
-    { "mppt": 2, "voltage": 214.5, "current": 4.0, "power": 863.0, "readable": true }
+    { "mppt": 1, "voltage": 214.4, "current": 2.5, "power": 556.0, "readable": true },
+    { "mppt": 2, "voltage": 205.1, "current": 3.3, "power": 691.0, "readable": true }
   ]
 }
 ```
+
+> O registrador **750** (≈ 3810 e variando ±8 entre leituras) **não** é contador de
+> energia: deveria só subir. Ficou fora do payload. A energia diária que a nuvem mostra
+> (3,89 kWh) não tem registrador identificado neste mapa.
 
 > ⚠️ O registrador **343** (~47–49 °C) varia com a carga, mas **não** é a temperatura
 > que o fabricante publica (a nuvem mostrava 43 °C quando ele marcava 48 °C). Ele é
@@ -375,7 +389,7 @@ isso que a varredura de slaves 0–32 "não achou nada". O endereço que funcion
 | Reg | Campo | Escala | Valor observado |
 | --- | --- | --- | --- |
 | 4501 | Estado de trabalho | enum | 3 |
-| 4502 / 4503 | Tensão / frequência da rede | ÷10 | 0 / 0 (sem rede) |
+| **4502 / 4503** | **Tensão / frequência da rede** | ÷10 | 0 / 0 (sem rede) |
 | **4504** | **Tensão PV1** | ÷10 | 45,3 V |
 | **4505** | **Potência PV1** | W | 0 |
 | **4506** | **Tensão da bateria** | ÷10 | 53,1 V |
@@ -401,7 +415,9 @@ isso que a varredura de slaves 0–32 "não achou nada". O endereço que funcion
 
 O bloco termina em **4564**: pedir 4565+ devolve o mesmo bloco truncado. Não existe
 registrador de corrente do PV2 — e a nuvem do fabricante também só mostra
-"PV2 input voltage" e "PV2 input power" para este modelo.
+"PV2 input voltage" e "PV2 input power" para este modelo. Por isso a corrente desse
+MPPT é a **única** grandeza do painel calculada a partir de duas medidas (`W ÷ V`) e
+aparece como `≈` na tela, com o motivo no tooltip.
 
 ### Como foi confirmado
 
