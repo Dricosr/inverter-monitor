@@ -188,6 +188,80 @@ class TestParseModbusB(unittest.TestCase):
         self.assertIsNone(d["pv"]["power"])
 
 
+class TestModbusSmg(unittest.TestCase):
+    """Bloco real do .106 (slave 5, registradores 4501+) lido com bytes trocados."""
+
+    # Recorte do que foi capturado ao vivo: indice = registro - 4501
+    LIVE = {
+        4501: 3, 4502: 0, 4503: 0, 4504: 453, 4505: 0, 4506: 531, 4507: 49,
+        4508: 4, 4509: 0, 4510: 2297, 4511: 600, 4512: 529, 4513: 321, 4514: 5,
+        4517: 520, 4518: 15202, 4521: 10200, 4522: 10200, 4529: 0, 4530: 0,
+        4563: 3051, 4564: 568,
+    }
+
+    def _regs(self):
+        return [self.LIVE.get(4501 + i, 0) for i in range(64)]
+
+    def test_campos_do_mapa(self):
+        d = im.parse_modbus_smg(self._regs())
+        self.assertAlmostEqual(d["pv1"], 45.3)
+        self.assertEqual(d["pv1_power"], 0)
+        self.assertAlmostEqual(d["pv2"], 305.1)
+        self.assertEqual(d["pv2_power"], 568)
+        self.assertAlmostEqual(d["battery_voltage"], 53.1)
+        self.assertEqual(d["soc"], 49)
+        self.assertEqual(d["charge_current"], 4)
+        self.assertAlmostEqual(d["output_voltage"], 229.7)
+        self.assertEqual(d["output_active_power"], 321)
+        self.assertEqual(d["cpu_version"], 15202)
+        self.assertEqual(d["nominal_power"], 10200)
+
+    def test_bloco_curto_nao_quebra(self):
+        d = im.parse_modbus_smg(self._regs()[:10])
+        self.assertAlmostEqual(d["pv1"], 45.3)
+        self.assertIsNone(d["pv2"], "registrador fora do bloco vira None, nao zero")
+        self.assertIsNone(d["pv2_power"])
+
+    def test_bytes_trocados(self):
+        # 4504 = 453 chega no fio como "c5 01"
+        response = bytes([5, 3, 8, 0xC5, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
+        body = response
+        data = body[3:3 + body[2]]
+        regs = [data[i] | (data[i + 1] << 8) for i in range(0, len(data) - 1, 2)]
+        self.assertEqual(regs[0], 453)
+
+    def test_merge_completa_o_mppt2(self):
+        base = im.parse_qpigs(
+            "(000.0 00.0 229.8 60.0 0482 0300 005 437 53.10 004 049 0059 "
+            "00.0 045.3 53.10 00000 00010110 00 00 00000 010\xd8\x7e\r", "B")
+        self.assertEqual(base["pv"]["mppt_unreadable"], [2])
+        merged = im.merge_modbus_smg(base, im.parse_modbus_smg(self._regs()))
+        self.assertEqual(merged["pv"]["mppt_unreadable"], [])
+        self.assertAlmostEqual(merged["pv"]["voltage2"], 305.1)
+        self.assertEqual(merged["pv"]["power2"], 568)
+        self.assertEqual(merged["pv"]["power"], 568.0, "PV1=0, entao o total e o PV2")
+        self.assertTrue(merged["pv"]["inputs"][1]["readable"])
+        self.assertEqual(merged["pv"]["inputs"][1]["current"], None)
+        self.assertEqual(merged["protocol"], "pi30_smg")
+        self.assertEqual(merged["smg"]["cpu_version"], 15202)
+
+    def test_merge_soma_as_duas_entradas(self):
+        base = im.parse_qpigs(
+            "(000.0 00.0 229.8 60.0 0482 0300 005 437 53.10 004 049 0059 "
+            "02.0 200.0 53.10 00000 00010110 00 00 00000 010\xd8\x7e\r", "B")
+        merged = im.merge_modbus_smg(base, im.parse_modbus_smg(self._regs()))
+        self.assertEqual(merged["pv"]["inputs"][0]["power"], 400.0)
+        self.assertEqual(merged["pv"]["power"], 968.0)
+
+    def test_merge_sem_leitura_nao_mexe(self):
+        base = im.parse_qpigs(
+            "(000.0 00.0 229.8 60.0 0482 0300 005 437 53.10 004 049 0059 "
+            "00.0 045.3 53.10 00000 00010110 00 00 00000 010\xd8\x7e\r", "B")
+        merged = im.merge_modbus_smg(base, {"pv2": None, "pv2_power": None})
+        self.assertEqual(merged["pv"]["mppt_unreadable"], [2], "sem 0925 tudo fica como antes")
+        self.assertEqual(merged["protocol"], "pi30")
+
+
 class TestParsePi30(unittest.TestCase):
     """Resposta QPIGS real, com CRC e CR no fim."""
 

@@ -54,7 +54,7 @@ DONGLE_UDP_PORT = 58899
 LOCAL_TCP_PORT = 8899  # porta em que o dongle conecta de volta (fixa no firmware)
 CLOUD_RECOVERY_DELAY = 1.5
 
-__version__ = "1.1.5"
+__version__ = "1.2.0"
 
 log = logging.getLogger("inverter")
 
@@ -231,6 +231,64 @@ def _safe_block(link: Dongle, start: int, count: int) -> list[int]:
     except Exception as exc:
         log.debug("bloco %d+%d indisponivel: %s", start, count, exc)
         return []
+
+
+# --------------------------------------------------------------------------- #
+# Mapa 0925 (SMG/Megarevo) — o mesmo que o dongle usa para alimentar a nuvem.
+#
+# O `.106` responde PI30 em ASCII, mas o dongle tambem le esse mapa Modbus do
+# inversor: e dele que sai o MPPT2, que o QPIGS nao carrega. Duas diferencas em
+# relacao ao mapa B do `.59`:
+#   * slave 5 (nao 1) e enderecos altos (4501+);
+#   * os registradores vem com os bytes trocados (little-endian).
+# --------------------------------------------------------------------------- #
+SMG_SLAVE = 5
+SMG_BASE = 4501
+SMG_COUNT = 64
+
+
+def _modbus_block_le(link: Dongle, start: int, count: int, slave: int) -> list[int]:
+    """Bloco Modbus com os bytes de cada registrador invertidos."""
+    time.sleep(MODBUS_GAP)
+    body = link.ask(4, rtu_read(slave, start, count))
+    if len(body) < 5 or body[1] & 0x80:
+        raise ValueError(f"resposta Modbus invalida: {body.hex(' ')}")
+    data = body[3:3 + body[2]]
+    return [data[i] | (data[i + 1] << 8) for i in range(0, len(data) - 1, 2)]
+
+
+def read_modbus_smg(link: Dongle, slave: int = SMG_SLAVE) -> dict:
+    """Mapa 0925 completo. Devolve os campos que interessam ao painel."""
+    return parse_modbus_smg(_modbus_block_le(link, SMG_BASE, SMG_COUNT, slave))
+
+
+def parse_modbus_smg(regs: list[int]) -> dict:
+    """Decodifica o bloco 4501+ do mapa 0925 (registradores ja em ordem de leitura)."""
+
+    def reg(address: int) -> int | None:
+        offset = address - SMG_BASE
+        return regs[offset] if 0 <= offset < len(regs) else None
+
+    return {
+        "pv1": _scaled(reg(4504), 10),
+        "pv1_power": reg(4505),
+        "pv2": _scaled(reg(4563), 10),
+        "pv2_power": reg(4564),
+        "battery_voltage": _scaled(reg(4506), 10),
+        "soc": reg(4507),
+        "charge_current": reg(4508),
+        "discharge_current": reg(4509),
+        "output_voltage": _scaled(reg(4510), 10),
+        "output_frequency": _scaled(reg(4511), 10),
+        "output_apparent_power": reg(4512),
+        "output_active_power": reg(4513),
+        "load_percent": reg(4514),
+        "machine_type": reg(4517),
+        "cpu_version": reg(4518),
+        "nominal_power": reg(4522),
+        "error_code": reg(4529),
+        "alarm_code": reg(4530),
+    }
 
 
 def _scaled(value: int | None, divisor: float) -> float | None:
@@ -551,7 +609,87 @@ def read_pi30(link: Dongle) -> dict:
     return parse_qpigs(raw, mode_letter, serial)
 
 
-READERS = {"modbus_a": read_modbus_a, "modbus_b": read_modbus_b, "pi30": read_pi30}
+def merge_modbus_smg(data: dict, smg: dict) -> dict:
+    """Completa um leitor PI30 com o que o mapa 0925 informa melhor.
+
+    O `QPIGS` carrega apenas o MPPT1 e subnotifica as correntes da bateria: numa
+    leitura pareada o mapa 0925 dizia 7 A de carga com 869 W no PV2 e 417 W de saida
+    (balanco pede 8,5 A, o que fecha com as perdas), enquanto o `QPIGS` dizia 2 A.
+    Por isso o 0925 tem prioridade em PV, bateria, saida e carga — e o PI30 fica
+    com o que ele e o unico a informar: temperatura, tensao do barramento e modo.
+    """
+    if not smg or (smg.get("pv2") is None and smg.get("pv2_power") is None):
+        return data
+
+    pv = data.setdefault("pv", {})
+    inputs = pv.get("inputs") or []
+    if len(inputs) >= 2:
+        inputs[1] = _pv_input(2, smg.get("pv2"), None, smg.get("pv2_power"))
+        inputs[1]["power_source"] = "modbus 0925 (reg 4564)"
+        pv["inputs"] = inputs
+        pv["voltage2"] = smg.get("pv2")
+        pv["power2"] = smg.get("pv2_power")
+        pv["mppt_unreadable"] = []
+        pv["mppt_count"] = 2
+        pv["mppt_power"] = [inputs[0].get("power"), inputs[1].get("power")]
+        measured = [v for v in (inputs[0].get("power"), inputs[1].get("power"))
+                    if v is not None]
+        if measured:
+            pv["power"] = round(sum(measured), 1)
+
+    battery = data.setdefault("battery", {})
+    voltage = smg.get("battery_voltage")
+    charge = smg.get("charge_current")
+    discharge = smg.get("discharge_current")
+    if smg.get("soc") is not None:
+        battery["soc"] = smg["soc"]
+    if voltage is not None:
+        battery["voltage"] = voltage
+    if charge is not None:
+        battery["current_charge"] = float(charge)
+    if discharge is not None:
+        battery["current_discharge"] = float(discharge)
+    if voltage is not None and charge is not None and discharge is not None:
+        battery["power"] = round(voltage * (charge - discharge), 1)
+    # O 0925 le a corrente da bateria de fato; o rotulo "(parcial)" deixa de valer.
+    battery.pop("current_partial", None)
+
+    output = data.setdefault("output", {})
+    for key, value in (("voltage", smg.get("output_voltage")),
+                       ("frequency", smg.get("output_frequency")),
+                       ("apparent_power", smg.get("output_apparent_power")),
+                       ("active_power", smg.get("output_active_power"))):
+        if value is not None:
+            output[key] = value
+    if smg.get("load_percent") is not None:
+        data["load_percent"] = smg["load_percent"]
+
+    active = output.get("active_power")
+    if isinstance(active, (int, float)) and voltage is not None:
+        charge_w = max(0.0, (charge or 0.0) * voltage)
+        discharge_w = max(0.0, (discharge or 0.0) * voltage)
+        data.setdefault("pv", {})["dc_balance"] = round(active + charge_w - discharge_w, 1)
+
+    data["smg"] = {k: smg.get(k) for k in
+                   ("machine_type", "cpu_version", "nominal_power", "error_code", "alarm_code")}
+    data["modbus_smg"] = True
+    data["protocol"] = "pi30_smg"
+    return data
+
+
+def read_pi30_smg(link: Dongle) -> dict:
+    """PI30 (ASCII) + mapa 0925. O 0925 e opcional: sem ele, volta ao PI30 puro."""
+    data = read_pi30(link)
+    try:
+        smg = read_modbus_smg(link)
+    except Exception as exc:  # noqa: BLE001
+        log.debug("mapa 0925 indisponivel: %s", exc)
+        return data
+    return merge_modbus_smg(data, smg)
+
+
+READERS = {"modbus_a": read_modbus_a, "modbus_b": read_modbus_b,
+           "pi30_smg": read_pi30_smg, "pi30": read_pi30}
 
 
 def _plausible(data: dict) -> bool:
@@ -567,7 +705,7 @@ def _plausible(data: dict) -> bool:
 def detect_protocol(ip: str) -> tuple[str, dict]:
     """Descobre qual leitor funciona para o dongle informado (uma conexao so)."""
     errors = {}
-    for proto in ("modbus_a", "modbus_b", "pi30"):
+    for proto in ("modbus_a", "modbus_b", "pi30_smg", "pi30"):
         link = None
         try:
             link = Dongle(ip, connect_timeout=25, reply_timeout=10)
@@ -639,7 +777,7 @@ def poll_once(devices: list,
         pn = spec.get("pn") if isinstance(spec, dict) else None
         if pn:
             entry["pn"] = pn
-        if entry.get("serial") and entry.get("protocol") == "pi30":
+        if entry.get("serial") and str(entry.get("protocol", "")).startswith("pi30"):
             entry["serial_trusted"] = False
 
         if not entry["online"]:

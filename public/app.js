@@ -41,6 +41,7 @@ const PROTOCOL_LABELS = {
   modbus_a: 'Modbus A',
   modbus_b: 'Modbus B',
   pi30: 'PI30',
+  pi30_smg: 'PI30 + Modbus 0925',
 };
 
 const ACTION_HINTS = {
@@ -344,11 +345,12 @@ function mpptCard(input) {
     </div>`;
   }
   const volts = Number.isFinite(input.voltage) ? `${input.voltage.toFixed(1)} V` : '—';
-  const amps = Number.isFinite(input.current) ? `${input.current.toFixed(1)} A` : '—';
-  return `<div class="mppt" title="${escapeHtml(`${label}: ${volts} × ${amps}`)}">
+  const amps = Number.isFinite(input.current) ? `${input.current.toFixed(1)} A` : null;
+  const detail = amps ? `${volts} · ${amps}` : volts;
+  return `<div class="mppt" title="${escapeHtml(`${label}: ${detail}`)}">
     <span>${escapeHtml(label)}</span>
     <strong>${escapeHtml(formatW(input.power))}</strong>
-    <small>${escapeHtml(`${volts} · ${amps}`)}</small>
+    <small>${escapeHtml(detail)}</small>
   </div>`;
 }
 

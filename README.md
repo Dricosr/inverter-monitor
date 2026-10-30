@@ -3,7 +3,7 @@
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Node.js](https://img.shields.io/badge/node.js-20%2B-5FA04E)
 ![Dependências](https://img.shields.io/badge/depend%C3%AAncias-nenhuma-brightgreen)
-![Testes](https://img.shields.io/badge/testes-69%20passando-brightgreen)
+![Testes](https://img.shields.io/badge/testes-83%20passando-brightgreen)
 ![Licença](https://img.shields.io/badge/licen%C3%A7a-MIT-green)
 ![Plataforma](https://img.shields.io/badge/plataforma-windows%20%7C%20linux%20%7C%20macos-lightgrey)
 
@@ -16,8 +16,8 @@ O coletor **não tem dependências externas** (só a biblioteca padrão do Pytho
 painel depende apenas de `express`.
 
 ```text
-inversor-59    Off-Grid  SOC 62 %   52,7 V   PV 524 W  (MPPT1 203 · MPPT2 321)
-inversor-106   Battery   SOC 48 %   53,1 V   saída 283 W · MPPT1 0 W · balanço DC ≥ 283 W
+inversor-59    Off-Grid  SOC 73 %   53,4 V   PV 2.338 W  (MPPT1 1.120 · MPPT2 1.218)
+inversor-106   Battery   SOC 52 %   53,4 V   PV 876 W  (MPPT1 0 · MPPT2 876 · 308,6 V)
 anenji-6k2     —         sem resposta (fora da LAN)
 ```
 
@@ -111,7 +111,7 @@ a conferência contra a nuvem do fabricante — em **[docs/PROTOCOL.md](docs/PRO
 | --- | --- | --- | --- | --- |
 | `anenji-6k2` | 192.168.18.33 | Espressif | Modbus RTU — mapa **EG4 3000EHV** (200–244) | reg. 643 = **6200 W** nominal |
 | `inversor-59` | 192.168.18.59 | Quectel | Modbus RTU — mapa **Anenji/Megarevo** | reg. 691 = **11000 W** nominal |
-| `inversor-106` | 192.168.18.106 | Espressif | ASCII **PI30** (`QPIGS`/`QMOD`) | `QMN` = `VMII-NXPW5KW`, CPU `00152.02`, nominal 10 200 VA/W |
+| `inversor-106` | 192.168.18.106 | Espressif | **PI30 + Modbus 0925** (`QPIGS` + slave 5, 4501+) | `QMN` = `VMII-NXPW5KW`, CPU `00152.02`, nominal 10 200 VA/W |
 
 > O `.106` responde ao `QID` com `55355535553555`, que **não** é o serial real: o
 > fabricante o identifica por `Q0045529822108191005` (PN `Q0045529822108`, obtido via
@@ -131,14 +131,14 @@ inversores: `.1` roteador Huawei, `.5` PC Gigabyte, `.41` e `.66` dispositivos T
 Este é o ponto mais importante do projeto: **o que não é medido não é inventado**. Cada
 card do painel diz de qual entrada o número veio.
 
-| Grandeza | `modbus_a` (.33) | `modbus_b` (.59) | `pi30` (.106) |
+| Grandeza | `modbus_a` (.33) | `modbus_b` (.59) | `pi30_smg` (.106) |
 | --- | --- | --- | --- |
 | SOC | ✅ | ✅ | ✅ |
 | Tensão da bateria | ✅ | ✅ | ✅ |
-| Corrente / potência da bateria | ✅ | ✅ | ⚠️ **parcial** |
-| PV — tensão por MPPT | 1 entrada | ✅ **MPPT1 e MPPT2** | ✅ só MPPT1 |
-| PV — corrente por MPPT | 1 entrada | ✅ **MPPT1 e MPPT2** | ✅ só MPPT1 |
-| PV — potência por MPPT | 1 entrada | ✅ **medida por MPPT** | ⚠️ só MPPT1 |
+| Corrente / potência da bateria | ✅ | ✅ | ✅ |
+| PV — tensão por MPPT | 1 entrada | ✅ **MPPT1 e MPPT2** | ✅ **MPPT1 e MPPT2** |
+| PV — corrente por MPPT | 1 entrada | ✅ **MPPT1 e MPPT2** | MPPT1 apenas |
+| PV — potência por MPPT | 1 entrada | ✅ **medida por MPPT** | ✅ **medida por MPPT** |
 | Temperatura do inversor | ✅ | ✅ (reg 231) | ✅ |
 | Temperatura do painel / módulo DC | ✅ DC | ✅ ambos | — |
 | Rede (tensão/frequência) | ✅ | — | — |
@@ -147,32 +147,32 @@ Cada entrada PV vira um objeto em **`pv.inputs`** e o painel desenha **um visor 
 MPPT**, com o somatório no cabeçalho do bloco. Entrada que o firmware não expõe aparece
 como `não exposto` — nunca herda o número da entrada vizinha.
 
-### O caso do MPS 10.2 (`.106`)
+### O caso do MPS 10.2 (`.106`) — dois MPPTs, os dois lidos
 
-Esse inversor tem **dois MPPTs** e o firmware **não implementa `QPIGS2`** (responde `NAK`;
-idem `QPGS0/1`, `QET`, `QLT`, `QBE`, `QPIZ`, `QPIC`, `QPIGS3`). O `QPIGS` carrega apenas
-o **MPPT1**, que está **sem painéis**. A geração real (~302 V, ~1083 W) está no MPPT2 e
-**não sai por nenhum comando aceito** — além do `QPIGS2`, 25 variantes
-(`QPIGS0/1/4/A/B`, `QPIG2`, `QPGS2/3/4`, `QPV2`, `QPIRI0/3`, `QMOD2`, `PE0/1/2`,
-`PD0/1`…) responderam `NAK`; o Modbus RTU também não responde nessa unidade (slaves 0–32
-testados, todos timeout).
+Esse inversor tem **dois MPPTs**. O `QPIGS` do PI30 carrega **apenas o MPPT1** e o
+firmware responde **NAK** ao `QPIGS2` (idem outras 25 variantes testadas). Durante um
+tempo o painel mostrou `MPPT2 não exposto` — corretamente, mas incompleto.
 
-Conferido contra o app do fabricante **no mesmo minuto**:
+O caminho estava em outro protocolo: **o mesmo dongle fala Modbus RTU com o inversor**
+para alimentar a nuvem, no mapa **0925** (slave 5, endereços 4501+, registradores com os
+bytes trocados). Dele saem o **PV2** (registrador 4563 = tensão ÷10, 4564 = potência) e
+também a corrente real da bateria.
 
-| Fonte | PV1 | PV2 | Total |
-| --- | --- | --- | --- |
-| `QPIGS` local | 41,7 V / 0 W | não exposto | — |
-| App do fabricante | 41,7 V / 0 W | 302 V / **1083 W** | **1083 W** |
+| Fonte | PV1 | PV2 | Total | Corrente de carga |
+| --- | --- | --- | --- | --- |
+| `QPIGS` puro | 45,3 V / 0 W | não exposto | 0 W | 2 A (subnotifica) |
+| `QPIGS` + mapa 0925 | 45,3 V / 0 W | **305–323 V / 570–920 W** | **~880 W** | **7–9 A** |
 
-O painel reproduz exatamente isso: o visor do **MPPT1** mostra `0 W · 41,7 V · 0,0 A` e o
-do **MPPT2** mostra `não exposto`, com o balanço DC como piso.
+A energia fecha: 876 W de PV2 − 348 W de saída = 528 W para a bateria ⇒ 9,9 A a 53,4 V,
+contra 9 A medidos. O mesmo cálculo com o `QPIGS` dava 3 A — errado.
 
-A corrente da bateria também é subnotificada: com 1083 W no MPPT2 e 331 W de saída, o
-`QPIGS` reportou **5 A** de carga enquanto a nuvem mostrava **12 A**. Por isso o coletor
-publica `battery.current_partial = true` e o painel mostra **"Carga da bateria (parcial)"**.
+O painel mostra os dois visores com valores reais e o total soma as duas entradas. Se o
+0925 não responder, o leitor volta ao PI30 puro e o MPPT2 volta a aparecer como
+`não exposto` — nada quebra.
 
-Consequência prática: o **balanço DC** desse inversor (`saída + carga − descarga`) é um
-**piso**, exibido como `≥ N W`. Ele nunca é publicado como "geração".
+> A nuvem do fabricante **não** serve de referência de instante: o dongle atende um
+> cliente por vez, então enquanto o coletor local lê, a nuvem mostra a amostra anterior.
+> A descoberta foi validada por estrutura (12 campos idênticos) e por balanço de energia.
 
 ## Painel web
 
@@ -320,7 +320,7 @@ Ajuste [`devices.json`](devices.json) se os IPs forem outros:
 [
   { "name": "anenji-6k2",   "ip": "192.168.18.33",  "protocol": "modbus_a", "pn": "Q0048085649157",    "soc_on": 60, "soc_off": 45 },
   { "name": "inversor-59",  "ip": "192.168.18.59",  "protocol": "modbus_b", "pn": "I30000251546403679", "soc_on": 60, "soc_off": 45 },
-  { "name": "inversor-106", "ip": "192.168.18.106", "protocol": "pi30",     "pn": "Q0045529822108",    "soc_on": 60, "soc_off": 45 }
+  { "name": "inversor-106", "ip": "192.168.18.106", "protocol": "pi30_smg", "pn": "Q0045529822108",    "soc_on": 60, "soc_off": 45 }
 ]
 ```
 
@@ -368,7 +368,7 @@ cron/agendador).
 $s = Invoke-RestMethod http://localhost:8080/status
 $s.devices.'inversor-59'.battery.soc            # 70
 $s.devices.'inversor-59'.pv.inputs | Select-Object mppt, voltage, current, power
-$s.devices.'inversor-106'.battery.current_partial  # True
+$s.devices.'inversor-106'.pv.inputs[1].power        # 876
 ```
 
 ```bash
@@ -410,11 +410,11 @@ Cada dispositivo é um objeto. Campos com `*` dependem do protocolo.
 | `battery.power`* | float | Potência (W); negativo = descarregando |
 | `battery.current_charge`* | float | Corrente de carga (A) — só `pi30` |
 | `battery.current_discharge`* | float | Corrente de descarga (A) — só `pi30` |
-| `battery.current_partial`* | bool | `true` no `pi30` quando as correntes não cobrem todos os MPPTs |
+| `battery.current_partial`* | bool | `true` quando o protocolo subnotifica as correntes (não ocorre mais no `.106`) |
 | `battery.voltage_scc`* | float | Tensão vista pelo SCC (V) — só `pi30` |
 | `battery.temperature`* | int | Temperatura informada pelo protocolo (mapa A); no mapa B use `temperature.dcdc` |
 | `pv.voltage` | float \| null | Tensão PV do **MPPT1** (V) |
-| `pv.voltage2`* | float | Tensão do **MPPT2** (`modbus_b`) |
+| `pv.voltage2`* | float | Tensão do **MPPT2** (`modbus_b` e `pi30_smg`) |
 | `pv.current`* | float | Corrente PV (A) |
 | `pv.power`* | float \| null | Potência PV (W) — **soma das entradas legíveis**; no `pi30` só o MPPT1 |
 | `pv.inputs`* | objeto[] | **Uma entrada por MPPT** com `mppt`, `voltage`, `current`, `power` e `readable` |
@@ -569,9 +569,9 @@ executores falsos, sem tocar no Gate, no SSH ou no XMRig.
 | Ciclo lento | Dongle morto gastando todo o timeout | Ajuste `--connect-timeout` ou confira `devices.json` |
 | Painel em 500 | Arquivo de estado corrompido | O `JsonStore` já se recupera e guarda `*.corrupt-<data>` |
 | SOC `0` com todos os campos zerados | Mapa errado respondendo com zeros | A validação de plausibilidade já rejeita isso na detecção |
-| `Geração solar 0 W` no `.106` de dia | MPPT1 sem painéis; a geração está no MPPT2, que não é legível | Esperado. O cartão mostra `MPPT2 não exposto` e o balanço DC (`≥`) |
-| `Corrente de carga (parcial)` | `QPIGS` não cobre o MPPT2 | Esperado. Use o valor da nuvem como referência |
-| `MPPT2 não exposto` no `.106` | O firmware não implementa `QPIGS2` e 25 variantes deram NAK | Esperado. O bloco PV mostra o piso pelo balanço DC |
+| `Geração solar 0 W` no `.106` de dia | PV1 sem painéis e o MPPT2 zerado | Confira o visor do MPPT2; se ele disser `não exposto`, o mapa 0925 não respondeu |
+| `Corrente de carga (parcial)` | Um inversor PI30 sem o mapa 0925 | Esperado nesse caso; com o 0925 o rótulo desaparece |
+| `MPPT2 não exposto` no `.106` | O mapa 0925 não respondeu neste ciclo | Rode com `-v`; o leitor cai para PI30 puro e volta ao normal no próximo ciclo |
 | Temperatura `—` | Modelo não expõe aquele sensor | Esperado; o tooltip da métrica explica |
 | EP2 volta às threads máximas sozinha | `"watch": true` no `config.json` do XMRig | Use `"watch": false` |
 | Regra em `Conflito` | A pausa do Gate foi criada por outra origem | A automação não desfaz pausa alheia; libere manualmente |
@@ -588,9 +588,10 @@ executores falsos, sem tocar no Gate, no SSH ou no XMRig.
 - **A porta 8899 é exclusiva.** Só um processo pode usá-la, e o coletor também exige a
   porta HTTP livre: se outra instância já estiver na 8080, a nova encerra em vez de rodar
   em paralelo.
-- **O `.106` não expõe o MPPT2** e subnotifica a corrente da bateria (ver
-  [acima](#o-caso-do-mps-102-106)). Além de `QPIGS2`, 25 variantes de comando foram
-  testadas e todas responderam `NAK`. O painel mostra a entrada como `não exposto`.
+- **O `.106` mistura dois protocolos.** O `QPIGS` só carrega o MPPT1 e subnotifica as
+  correntes da bateria; o mapa Modbus **0925** (slave 5, 4501+) traz o MPPT2 e as
+  correntes reais. O leitor `pi30_smg` usa os dois — se o 0925 não responder, cai para
+  PI30 puro e o MPPT2 volta a aparecer como `não exposto`.
 - `inversor-59` publica modo, carga, temperaturas e PV, mas **não** tensão de rede — os
   registradores 202/203 respondem zero nesse modelo.
 - Em `pi30`, `current_charge` tem 1 decimal e `current_discharge` é inteiro.
@@ -606,12 +607,14 @@ executores falsos, sem tocar no Gate, no SSH ou no XMRig.
 
 - [ ] Expor tensão/frequência de rede no `.59` caso o firmware passe a responder os
       registradores 202/203.
-- [ ] Procurar um comando/driver que devolva o MPPT2 do `.106` (o dongle o conhece, mas
-      só o expõe no canal da nuvem).
-- [ ] Publicar os alarmes do `.106`: o `QPIWS` **responde** (`0000010000…`), falta validar
-      o mapeamento bit a bit antes de mostrar na tela.
-- [ ] Energia acumulada (kWh do dia) — a nuvem mostra; os registradores ainda não foram
-      localizados no mapa B.
+- [ ] Expor os contadores de energia do mapa 0925 (bloco 4554–4561) — os valores ainda
+      não foram decodificados.
+- [ ] Publicar os alarmes do `.106`: o `QPIWS` responde e o mapa 0925 tem código de erro
+      (4529) e de alarme (4530); falta validar o significado de cada bit.
+- [ ] Modo *proxy*: manter nuvem **e** local simultâneos, redirecionando
+      `ess.eybond.com` no DNS do roteador e repassando para o servidor real
+      (ideia de [`powmr-eybond-proxy`]).
+- [ ] Publicação opcional em MQTT com *discovery* para Home Assistant.
 - [ ] Modo *proxy*: manter nuvem **e** local simultâneos, redirecionando
       `ess.eybond.com` no DNS do roteador e repassando para o servidor real
       (ideia de [`powmr-eybond-proxy`]).
@@ -621,6 +624,8 @@ executores falsos, sem tocar no Gate, no SSH ou no XMRig.
 
 - [`powmr-eybond-proxy`] — proxy DNS para dongles Eybond.
 - [`anenji-local-modbus`] — mapa de registradores de um Anenji específico.
+- [`ha-eybond-local`] — integração Home Assistant para estes dongles; o catálogo interno
+  de protocolos foi o que revelou o mapa **0925** (slave 5, base 4501) usado no `.106`.
 - `mpp-solar` — implementação de referência do PI30 (Voltronic/Axpert).
 - Protocolo PI30: comandos `QPIGS`, `QPIRI`, `QMOD` e o CRC-16/XMODEM com correção dos
   bytes `0x28`, `0x0D` e `0x0A`.
@@ -628,7 +633,9 @@ executores falsos, sem tocar no Gate, no SSH ou no XMRig.
 
 [`powmr-eybond-proxy`]: https://github.com/leodeslf/powmr-eybond-proxy
 [`anenji-local-modbus`]: https://github.com/leodeslf/anenji-local-modbus
+[`ha-eybond-local`]: https://github.com/groove-max/ha-eybond-local
 
 ## Licença
 
 MIT — veja [LICENSE](LICENSE).
+

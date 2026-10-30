@@ -18,7 +18,7 @@
   {
     "name": "inversor-106",
     "ip": "192.168.18.106",
-    "protocol": "pi30",
+    "protocol": "pi30_smg",
     "pn": "Q0045529822108",
     "soc_on": 60,
     "soc_off": 45

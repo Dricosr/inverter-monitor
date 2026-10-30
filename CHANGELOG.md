@@ -3,6 +3,36 @@
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 e versionamento [SemVer](https://semver.org/lang/pt-BR/).
 
+## [1.2.0] — 2026-10-31
+
+### Adicionado
+
+- **O MPPT2 do `.106` agora é lido do próprio aparelho.** O caminho não estava no PI30:
+  o mesmo dongle fala **Modbus RTU** com o inversor para alimentar a nuvem, no mapa
+  **0925** — slave **5**, endereços **4501+** e registradores com **bytes trocados**.
+  Dele saem `4563` (tensão PV2 ÷10) e `4564` (potência PV2 em W), além da corrente real
+  da bateria. Novo leitor **`pi30_smg`** (PI30 + 0925) usado pelo `.106`.
+- **As correntes da bateria deixaram de ser parciais.** Leitura simultânea (30/10, 11:22)
+  mostrou `QPIGS` dizendo 2 A de carga enquanto o 0925 dizia 7 A, com o balanço de
+  energia (869 W de PV2 − 417 W de saída) ÷ 53,4 V pedindo 8,5 A: quem estava certo era
+  o 0925. Soc, tensão da bateria, correntes, saída e carga do inversor passam a vir dele;
+  temperatura, barramento e modo continuam vindo do PI30.
+- `pv.inputs`, `pv.voltage2`, `pv.power2` e `pv.mppt_power` ficam completos para os dois
+  MPPTs, e o cartão de resumo deixa de mostrar "Geração solar (parcial)".
+
+### Corrigido
+
+- **Fallback silencioso**: se o mapa 0925 não responder num ciclo, o leitor volta ao PI30
+  puro e o MPPT2 aparece como `não exposto` em vez de derrubar a leitura.
+
+### Documentação
+
+- `docs/PROTOCOL.md` ganhou a seção **7**, com o mapa 0925 completo, a pegadinha dos
+  bytes trocados e o passo a passo da validação (12 campos idênticos aos da nuvem,
+  balanço de energia fechando e a série de potências acompanhando o sol).
+- Registrado que a nuvem **não** serve de referência de instante: o dongle atende um
+  cliente por vez, então a nuvem fica com a última amostra enquanto o coletor lê.
+
 ## [1.1.5] — 2026-10-31
 
 ### Adicionado
