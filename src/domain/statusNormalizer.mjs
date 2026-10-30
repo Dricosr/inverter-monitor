@@ -1,9 +1,22 @@
 export class StatusNormalizer {
-  normalize(raw, devicesConfig) {
+  /**
+   * @param {object} raw snapshot do coletor
+   * @param {Array} devicesConfig `devices.json`
+   * @param {object} [options] `snapshotAgeSeconds` e `staleAfterSeconds`
+   */
+  normalize(raw, devicesConfig, options = {}) {
     const timestamp = raw?.timestamp ?? null;
     const deviceMap = raw?.devices && typeof raw.devices === 'object' ? raw.devices : {};
     const configured = Array.isArray(devicesConfig) ? devicesConfig : [];
     const ids = configured.map((device) => device.name).filter(Boolean);
+    const staleAfterSeconds = Number.isFinite(options.staleAfterSeconds) ? options.staleAfterSeconds : 120;
+    const snapshotAge = Number.isFinite(options.snapshotAgeSeconds)
+      ? options.snapshotAgeSeconds
+      : this.#age(timestamp);
+    // Snapshot velho invalida o arquivo inteiro: nao adianta marcar so o que faltou
+    // neste ciclo. Sem isto o painel mostrava "Leitura atrasada" no topo e numeros
+    // com cara de frescos nos cards — mentira de 5 minutos de idade.
+    const snapshotStale = snapshotAge != null && snapshotAge > staleAfterSeconds;
 
     return ids.map((id) => {
       const device = deviceMap[id] ?? {};
@@ -18,7 +31,8 @@ export class StatusNormalizer {
       // ultima leitura boa. Aqui vira idade em segundos — e e o que a UI usa para
       // pintar o valor em cinza em vez de trocar por "nao exposto".
       const staleFields = this.#staleFields(device.cache);
-      const inputs = this.#pvInputs(pv.inputs, staleFields);
+      const wholeAge = snapshotStale ? snapshotAge : null;
+      const inputs = this.#pvInputs(pv.inputs, staleFields, wholeAge);
       const staleSince = this.#object(device.cache).at ?? null;
       let pvPower = this.#finite(pv.power, null);
 
@@ -71,11 +85,13 @@ export class StatusNormalizer {
         fresh: Boolean(timestamp),
         timestamp,
         stale: {
-          whole: !online && Object.keys(staleFields).length > 0,
-          since: staleSince,
-          ageSeconds: this.#age(staleSince),
+          whole: snapshotStale || (!online && Object.keys(staleFields).length > 0),
+          since: staleSince ?? (snapshotStale ? timestamp : null),
+          ageSeconds: wholeAge ?? this.#age(staleSince),
           fields: staleFields,
         },
+        snapshotAgeSeconds: snapshotAge,
+        snapshotStale,
         mode: device.mode ?? null,
         soc,
         battery: {
@@ -147,9 +163,10 @@ export class StatusNormalizer {
 
   /**
    * Uma entrada PV por MPPT: valores nulos continuam nulos (nao viram zero).
-   * `staleFields` diz quais entradas vieram do cache e ha quanto tempo.
+   * `staleFields` diz quais entradas vieram do cache e ha quanto tempo;
+   * `wholeAge` marca todas quando o snapshot inteiro esta velho.
    */
-  #pvInputs(value, staleFields = {}) {
+  #pvInputs(value, staleFields = {}, wholeAge = null) {
     if (!Array.isArray(value)) return [];
     return value
       .map((entry, index) => ({ entry, index }))
@@ -158,6 +175,7 @@ export class StatusNormalizer {
         const ages = Object.entries(staleFields)
           .filter(([path]) => path.startsWith(`pv.inputs.${index}.`))
           .map(([, age]) => age);
+        if (wholeAge != null) ages.push(wholeAge);
         return {
           mppt: this.#finite(entry.mppt, index + 1),
           voltage: this.#finite(entry.voltage, null),

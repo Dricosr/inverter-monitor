@@ -33,3 +33,23 @@ $rule = Get-NetFirewallRule -DisplayName 'InverterMonitorAPI 8080' -ErrorAction 
 if (-not $rule) {
     New-NetFirewallRule -DisplayName 'InverterMonitorAPI 8080' -Direction Inbound -Protocol TCP -LocalPort 8080 -Action Allow | Out-Null
 }
+
+# --- Vigia: o Agendador nao reinicia tarefa que morre com codigo 0 ---------------
+$watchdogName = 'InverterMonitorWatchdog'
+$watchdog = New-ScheduledTaskAction -Execute $PowerShell -Argument (
+    "-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass " +
+    "-File `"$Repo\scripts\watchdog.ps1`"")
+$everyTwoMinutes = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
+    -RepetitionInterval (New-TimeSpan -Minutes 2)
+$watchdogSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
+    -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew `
+    -ExecutionTimeLimit (New-TimeSpan -Minutes 5)
+$watchdogSettings.Hidden = $true
+
+$existingWatchdog = Get-ScheduledTask -TaskName $watchdogName -ErrorAction SilentlyContinue
+if ($existingWatchdog) { Unregister-ScheduledTask -TaskName $watchdogName -Confirm:$false }
+
+Register-ScheduledTask -TaskName $watchdogName -Action $watchdog -Trigger $everyTwoMinutes `
+    -Principal $principal -Settings $watchdogSettings `
+    -Description 'Reinicia o coletor se a porta 8080 cair ou o snapshot parar de atualizar'
+Start-ScheduledTask -TaskName $watchdogName

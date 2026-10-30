@@ -97,6 +97,8 @@ h2 { margin: 4px 0 0; font-size: 22px; }
 .battery-fill.mid { background: var(--yellow); }
 .battery-fill.low { background: var(--red); }
 .device-alert { margin: 0; color: #f9b0b0; background: #241416; border: 1px solid #4a2b2f; border-radius: 9px; padding: 6px 9px; font-size: 11px; line-height: 1.35; }
+/* Snapshot velho nao e falha do inversor: mesmo aviso, tom neutro. */
+.device-alert--stale { color: #d8c48f; background: #241f14; border-color: #4a4028; }
 .device-diag { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.45; }
 .metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .metric { background: var(--panel-2); border-radius: 9px; padding: 10px 11px; min-width: 0; }

@@ -365,6 +365,9 @@ Um dongle pode sumir da rede (sem energia, DHCP novo, Wi-Fi caído). O sistema c
 | Painel | O card continua preenchido, **em cinza**, com `Sem resposta há N s · os valores são da última leitura, às HH:MM:SS` |
 | Painel | Chips `2/3 online` e `<nome> sem resposta`, com o motivo no tooltip |
 | Resumo | SOC médio e potências incluem o último valor conhecido e o tooltip avisa isso |
+| Painel | Snapshot com mais de 120 s marca **todos** os valores como desatualizados e ganha o chip `Coletor fora do ar` |
+| Serviço | `InverterMonitorWatchdog` (2 min) reinicia o coletor se a porta 8080 cair ou o snapshot parar |
+| Serviço | Ao subir, o coletor recupera o último estado do disco: o painel volta preenchido, em cinza |
 | Automação | Sem SOC fresco, nenhuma decisão é tomada: a regra fica `Sem leitura` e nada é liberado nem intensificado às cegas |
 | Automação | Se a ação já estava aplicada, ela **continua** aplicada e a regra mostra `Mantida` |
 | Integrações | Gate, XMRig e ai-node offline aparecem como `Sem resposta` com o motivo |
@@ -462,6 +465,18 @@ curl -s http://localhost:8080/status/inversor-59 | jq .pv
 
 `action` aceita `gate_pause`, `ep2_mining_reduce` ou `ainode_mining_reduce`.
 
+Do `/api/dashboard`, além de `devices`, `rules`, `intentions` e `integrations`:
+
+| Campo | Significado |
+| --- | --- |
+| `snapshotTimestamp` | quando o snapshot foi lido (fim do ciclo do coletor) |
+| `snapshotAgeSeconds` | idade do snapshot agora |
+| `collectorSource` | `collector_api` (ao vivo) ou `snapshot_file` (coletor fora do ar) |
+| `collector.reachable` | `false` quando o painel caiu para o arquivo |
+| `collector.staleAfterSeconds` | acima disso o snapshot inteiro é considerado velho (**120 s**) |
+| `devices[].snapshotStale` | `true` quando o arquivo todo está velho: **todo** valor é antigo |
+| `devices[].stale` | `whole`, `since`, `ageSeconds` e `fields` (caminho → idade em segundos) |
+
 ## Formato do JSON
 
 Cada dispositivo é um objeto. Campos com `*` dependem do protocolo.
@@ -545,7 +560,9 @@ No painel (`/api/dashboard`) o normalizador transforma isso em idades:
 }
 ```
 
-`whole: true` significa que o card inteiro veio do cache (inversor sem resposta).
+`whole: true` significa que o card inteiro veio do cache (inversor sem resposta) **ou**
+que o snapshot está velho (`snapshotStale`): quando o coletor para, tudo na tela envelhece
+junto e a idade é a do arquivo.
 
 Um exemplo real e completo está em
 [`examples/sample-output.json`](examples/sample-output.json).
@@ -610,7 +627,38 @@ Start-ScheduledTask -TaskName InverterMonitorCollector   # reiniciar após mudan
 Get-ScheduledTaskInfo -TaskName InverterMonitorCollector | Select-Object LastRunTime, LastTaskResult
 ```
 
-**Linux** — `systemd`:
+### Vigia do coletor (`InverterMonitorWatchdog`)
+
+O Agendador só reinicia uma tarefa em caso de **falha** — um processo que morre com
+código 0 fica morto. Em 30/10 foi exatamente o que aconteceu: o coletor sumiu às 18:49 e
+a leitura parou por 6 minutos. O vigia cobre esse buraco:
+
+```powershell
+pwsh -File scripts\watchdog.ps1              # roda uma vez (silencioso se estiver tudo bem)
+pwsh -File scripts\watchdog.ps1 -MaxAgeSeconds 300
+```
+
+Registrado a cada **2 minutos**, ele reinicia o coletor quando:
+
+| Sintoma | Significado |
+| --- | --- |
+| porta 8080 não escuta | o processo morreu (inclusive com código 0) |
+| snapshot parado há mais de 180 s | o processo vive, mas travou num ciclo (dongle mudo) |
+
+O que aconteceu fica em `data/watchdog.log`; o que o coletor fez fica em
+`data/collector.log` (rotativo, 1 MB × 3). Nada é registrado enquanto está tudo bem.
+
+```powershell
+Get-Content data\watchdog.log -Tail 10      # reinícios automáticos
+Get-Content data\collector.log -Tail 20     # ciclos, erros e encerramentos
+```
+
+O coletor também recupera o estado anterior ao subir: `history_from_snapshot()` lê o
+`latest.json` e o que estava na tela volta **em cinza**, com a idade, em vez de sumir
+enquanto o primeiro ciclo não termina.
+
+**Linux** — equivalente com `systemd` (`Restart=always` já cobre o caso da porta cair; o
+`ExecStart` não precisa de vigia):
 
 ```ini
 # /etc/systemd/system/inverter-monitor.service
@@ -650,6 +698,7 @@ inverter-monitor/
 │  └─ routes/            API do painel
 ├─ public/               HTML, CSS, JS e ícone do painel
 ├─ deploy/               tarefas agendadas e script de threads do XMRig
+├─ scripts/watchdog.ps1  reinicia o coletor se a porta 8080 cair ou o snapshot parar
 ├─ examples/             saída real, uso como biblioteca, PowerShell e dump de mapas
 ├─ tests/                parsers e poll (Python) e automação (Node)
 └─ data/                 estado em tempo de execução (ignorado pelo Git)
@@ -658,11 +707,11 @@ inverter-monitor/
 ## Testes
 
 ```bash
-# parsers, CRC, framing, poll e cache do ultimo valor valido (70 testes, nenhum toca a rede)
+# parsers, CRC, framing, poll, cache do valor valido e reinicio (75 testes, sem rede)
 python tests/test_parsers.py
 python tests/test_poll.py
 
-# automacao, integracoes e normalizacao do painel (41 testes)
+# automacao, integracoes e normalizacao do painel (43 testes)
 npm test
 ```
 
@@ -685,6 +734,9 @@ executores falsos, sem tocar no Gate, no SSH ou no XMRig.
 | `Geração solar 0 W` no `.106` de dia | PV1 sem painéis e o MPPT2 zerado | Confira o visor do MPPT2; se ele disser `não exposto`, o mapa 0925 não respondeu |
 | `Corrente de carga (parcial)` | Um inversor PI30 sem o mapa 0925 | Esperado nesse caso; com o 0925 o rótulo desaparece |
 | `MPPT2 não exposto` no `.106` | Os dois canais falharam e não há leitura anterior | Rode com `-v`; quando existe leitura anterior o painel mostra o valor em cinza com a idade |
+| `Leitura atrasada` + `Coletor fora do ar` | O processo do coletor não está respondendo na 8080 | O `InverterMonitorWatchdog` reinicia em até 2 min; se persistir, veja `data/watchdog.log` e `data/collector.log` |
+| Card inteiro cinza com `Leitura de ... há N min sem atualizar` | O snapshot está velho: nada foi lido desde aquele horário | Confira o coletor; os valores são os últimos conhecidos, não leituras de agora |
+| `encerramento sujo anterior` no `collector.log` | O processo morreu no meio de uma gravação (`.tmp` órfão) | O `.tmp` é removido e o `latest.json` anterior continua válido; o vigia já recolocou o serviço |
 | `.106` marcado `offline` sem motivo | NAK ou resposta vazia no ASCII eram tratados como falha | Corrigido na 1.3.2: NAK/vazio são repetidos e o 0925 sozinho mantém o inversor online |
 | Valor em cinza com `sem atualização há N s` | O campo não veio neste ciclo e está sendo reaproveitado | Esperado — é o último valor válido; a próxima leitura boa volta a deixá-lo branco |
 | Nota com idade grande que não diminui | O campo não volta a ser lido (registrador instável) | Veja `cache.fields` em `/status`; a idade é contada desde a última leitura real daquele campo |

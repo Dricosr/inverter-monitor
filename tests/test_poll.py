@@ -301,6 +301,58 @@ class TestRunCycle(unittest.TestCase):
         self.assertEqual(dentro["maximo"], 1)
 
 
+class TestReinicio(unittest.TestCase):
+    """Reiniciar o coletor nao pode apagar o painel."""
+
+    def test_recupera_estado_do_snapshot_anterior(self):
+        with tempfile.TemporaryDirectory() as directory:
+            alvo = os.path.join(directory, "latest.json")
+            with mock.patch.object(im, "Dongle", FakeLink), \
+                    mock.patch.dict(im.READERS, {"modbus_a": fake_reader_ok}):
+                anterior = im.poll_once(
+                    [{"name": "x", "ip": "10.0.0.9", "protocol": "modbus_a"}], {}, {}, {})
+            im.write_json_atomic(alvo, anterior)
+
+            last_ok, history = im.history_from_snapshot(alvo)
+            self.assertIn("x", history)
+            self.assertEqual(last_ok["x"], anterior["devices"]["x"]["last_ok"])
+            self.assertEqual(history["x"]["values"]["battery"]["soc"], 55)
+            self.assertNotIn("online", history["x"]["values"])
+            self.assertIn("output.active_power", history["x"]["fields_at"])
+
+            # Primeiro ciclo apos o reinicio falha: o painel mantem o que veio do disco.
+            with mock.patch.object(im, "Dongle", FakeLink), \
+                    mock.patch.dict(im.READERS, {"modbus_a": fake_reader_fail}):
+                primeiro = im.poll_once(
+                    [{"name": "x", "ip": "10.0.0.9", "protocol": "modbus_a"}],
+                    {}, {}, last_ok, history)
+            entrada = primeiro["devices"]["x"]
+            self.assertFalse(entrada["online"])
+            self.assertEqual(entrada["battery"]["soc"], 55)
+            self.assertIn("battery.soc", entrada["cache"]["fields"])
+
+    def test_arquivo_ausente_ou_corrompido_nao_quebra(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertEqual(im.history_from_snapshot(os.path.join(directory, "nao.json")), ({}, {}))
+            quebrado = os.path.join(directory, "quebrado.json")
+            with open(quebrado, "w", encoding="utf-8") as fh:
+                fh.write("{ isso nao e json")
+            self.assertEqual(im.history_from_snapshot(quebrado), ({}, {}))
+
+    def test_limpa_temporarios_de_escrita_abortada(self):
+        with tempfile.TemporaryDirectory() as directory:
+            alvo = os.path.join(directory, "latest.json")
+            im.write_json_atomic(alvo, {"devices": {}})
+            restos = [os.path.join(directory, f"latest.json.{pid}.tmp") for pid in (111, 222)]
+            for path in restos:
+                with open(path, "w", encoding="utf-8") as fh:
+                    fh.write('{"devices": {"x": {"onl')
+            sobras = im.cleanup_tmp_files(alvo)
+            self.assertEqual(len(sobras), 2, "os restos sao reportados no log")
+            self.assertEqual([p for p in os.listdir(directory) if p.endswith(".tmp")], [])
+            self.assertTrue(os.path.exists(alvo), "o snapshot bom continua intacto")
+
+
 class TestEscritaAtomica(unittest.TestCase):
     def test_grava_json_valido_e_sem_temporario(self):
         with tempfile.TemporaryDirectory() as directory:

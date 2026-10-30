@@ -3,6 +3,45 @@
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 e versionamento [SemVer](https://semver.org/lang/pt-BR/).
 
+## [1.3.4] — 2026-10-31
+
+### Corrigido
+
+- **A leitura travou por 6 minutos e o painel não avisou direito.** Em 30/10 às 18:49 o
+  processo do coletor morreu no meio de uma gravação (`latest.json.16228.tmp` ficou para
+  trás) e nada o reiniciou: a tarefa agendada não tinha "reiniciar em caso de falha"
+  útil, o console dele é oculto e não havia log. O painel mostrou `Leitura atrasada` no
+  topo — mas os cards seguiam com números de cara fresca.
+- **Snapshot velho agora invalida tudo.** A idade do snapshot entra na normalização: com
+  o coletor parado há mais que `staleAfterSeconds`, **todo** valor da tela (métricas,
+  MPPTs, totais e resumos) passa a ser marcado como desatualizado, com a idade do
+  arquivo, e cada card ganha o aviso `Leitura de 30/10/2026, 18:56 · há 6 min sem
+  atualizar`. Antes só o que faltava no último ciclo era marcado.
+- Novo chip **`Coletor fora do ar`** — `Leitura atrasada` dizia o sintoma, não a causa.
+  O dashboard passou a publicar `collector.reachable`.
+
+### Adicionado
+
+- **`scripts/watchdog.ps1` + tarefa `InverterMonitorWatchdog`** (a cada 2 minutos):
+  reinicia o coletor se a porta 8080 não responder **ou** se o snapshot parar de
+  atualizar por mais de 180 s. Cobre o caso que o Agendador não cobre — processo que
+  morre com código 0 — e o caso de processo vivo mas travado. Medido: recuperação em
+  ~15 s, e um disparo real às 19:02 devolveu o serviço sozinho.
+- **Log rotativo em `data/collector.log`** (1 MB × 3): início com versão e pid,
+  encerramento, traceback de erro inesperado e aviso de **encerramento sujo** (`.tmp`
+  órfão), que é o único rastro quando não há console.
+- **Reiniciar não apaga o painel**: `history_from_snapshot()` recarrega `last_ok` e a
+  última leitura boa do `latest.json` para o cache inicial, então o painel volta com os
+  valores em cinza em vez de vazio.
+- `.tmp` de gravações abortadas são removidos no início (`cleanup_tmp_files`).
+- Tarefa do coletor regravada com `--log` implícito, `AllowStartIfOnBatteries`/
+  `DontStopIfGoingOnBatteries` e `RestartCount 3`.
+
+### Testes
+
+- 75 Python + 43 Node (novos: snapshot velho invalida tudo, snapshot recente não marca
+  nada, recuperação de estado no reinício, `.tmp` órfão, JSON corrompido).
+
 ## [1.3.3] — 2026-10-31
 
 ### Adicionado

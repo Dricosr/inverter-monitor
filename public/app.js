@@ -122,15 +122,21 @@ function renderStatusChips(dashboard) {
   const chips = [];
   const age = dashboard.snapshotAgeSeconds;
   const staleAfter = dashboard.collector?.staleAfterSeconds ?? 120;
+  const collectorDown = dashboard.collector?.reachable === false;
 
   if (age == null) {
     chips.push(chip('danger', 'Sem dados', 'O coletor ainda não gravou uma leitura'));
   } else if (age > staleAfter) {
-    chips.push(chip('warn', 'Leitura atrasada', `Última leitura em ${formatSnapshotTimestamp(dashboard.snapshotTimestamp)}`));
+    chips.push(chip('warn', 'Leitura atrasada', `Última leitura em ${formatSnapshotTimestamp(dashboard.snapshotTimestamp)} · há ${formatAge(age)}`));
     chips.push(chip('muted', `Há ${formatAge(age)}`));
   } else {
     chips.push(chip('ok', 'Ao vivo', dashboard.collectorSource === 'collector_api' ? 'Coletor consultado agora' : 'Leitura gravada pelo coletor'));
     chips.push(chip('muted', `Há ${formatAge(age)}`, 'Tempo desde a última leitura dos inversores'));
+  }
+  // "Leitura atrasada" nao diz por que. Se o coletor nao respondeu, ele e a causa.
+  if (collectorDown && (age == null || age > staleAfter)) {
+    chips.push(chip('danger', 'Coletor fora do ar',
+      'O painel está mostrando o último snapshot gravado em disco; os valores estão em cinza com a idade'));
   }
 
   const online = dashboard.devices.filter((device) => device.online).length;
@@ -268,8 +274,15 @@ function renderDevices(devices) {
       ? chip('muted', device.mode ? (MODE_LABELS[device.mode] ?? device.mode) : 'Modo não informado',
         device.mode ? (MODE_HINTS[device.mode] ?? `Modo informado pelo inversor: ${device.mode}.`) : 'O inversor não informou o modo de operação.')
       : chip('danger', 'Sem resposta', device.error ?? 'O dongle não respondeu na última leitura')];
-    if (device.online && staleAge(device, 'mode') != null) chips.push(chip('warn', 'Leitura parcial'));
+    // "Leitura parcial" so faz sentido quando o snapshot esta fresco: com o arquivo
+    // inteiro velho o banner do card ja explica a situacao.
+    if (device.online && !allStale && staleAge(device, 'mode') != null) chips.push(chip('warn', 'Leitura parcial'));
     if (soc != null && soc < 30) chips.push(chip('warn', 'Bateria baixa'));
+    // Snapshot velho com o inversor "online" no arquivo: o aviso do card e o que
+    // impede o numero cinza de passar por leitura de agora.
+    const banner = device.online
+      ? (device.snapshotStale ? staleBanner(device) : '')
+      : `<p class="device-alert" title="${escapeHtml(device.error ?? '')}">${escapeHtml(offlineReason(device))}</p>`;
 
     return `
       <article class="device-card${device.online ? '' : ' offline'}">
@@ -290,7 +303,7 @@ function renderDevices(devices) {
             ${device.online || soc != null
               ? `<div class="battery-track${allStale ? ' is-stale' : ''}"><div class="battery-fill${level}" style="width:${soc ?? 0}%"></div></div>`
               : ''}
-            ${device.online ? '' : `<p class="device-alert" title="${escapeHtml(device.error ?? '')}">${escapeHtml(offlineReason(device))}</p>`}
+            ${banner}
           </div>
           <div class="metrics">
             ${metric('Potência de saída', formatW(device.output.activePower), null, opts('output.active_power'))}
@@ -452,6 +465,16 @@ function offlineReason(device) {
   }
   if (when) return `Sem resposta desde a última leitura, às ${when}`;
   return 'Sem resposta · sem leitura desde que o coletor iniciou';
+}
+
+/** Aviso do card quando o snapshot inteiro está velho (coletor parado). */
+function staleBanner(device) {
+  const age = device.stale?.ageSeconds;
+  const when = formatSnapshotTimestamp(device.timestamp);
+  const text = age != null
+    ? `Leitura de ${when} · há ${formatAge(age)} sem atualizar`
+    : `Leitura de ${when}`;
+  return `<p class="device-alert device-alert--stale" title="O coletor parou de atualizar; os valores abaixo são os últimos conhecidos">${escapeHtml(text)}</p>`;
 }
 
 function renderIntegrations(dashboard) {
@@ -672,8 +695,12 @@ function formatAge(seconds) {
  */
 function staleAge(device, path) {
   const fields = device.stale?.fields;
-  if (!fields || typeof fields !== 'object') return null;
-  return Object.prototype.hasOwnProperty.call(fields, path) ? fields[path] : null;
+  if (fields && typeof fields === 'object'
+    && Object.prototype.hasOwnProperty.call(fields, path)) {
+    return fields[path];
+  }
+  // Snapshot inteiro velho (coletor parado): tudo na tela tem a idade do snapshot.
+  return device.stale?.whole === true ? device.stale.ageSeconds ?? null : null;
 }
 
 /** Verdadeiro quando o card inteiro veio do cache (inversor sem resposta). */

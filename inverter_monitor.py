@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import glob
 import json
 import logging
 import os
@@ -50,12 +51,13 @@ import threading
 import time
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from logging.handlers import RotatingFileHandler
 
 DONGLE_UDP_PORT = 58899
 LOCAL_TCP_PORT = 8899  # porta em que o dongle conecta de volta (fixa no firmware)
 CLOUD_RECOVERY_DELAY = 1.5
 
-__version__ = "1.3.3"
+__version__ = "1.3.4"
 
 log = logging.getLogger("inverter")
 
@@ -1214,6 +1216,54 @@ def write_json_atomic(path: str, value) -> None:
     os.replace(temporary, path)
 
 
+def cleanup_tmp_files(out_path: str) -> list[str]:
+    """Remove `.tmp` de escritas que nunca chegaram a ser trocadas.
+
+    Sobrar um `latest.json.<pid>.tmp` significa que o processo morreu no meio de uma
+    gravacao. Nao ha nada a recuperar dele (o `latest.json` anterior continua valido),
+    mas a lista serve de aviso no log: e o unico rastro de um encerramento sujo quando
+    o coletor nao tem console.
+    """
+    leftovers = glob.glob(f"{out_path}.*.tmp")
+    for path in leftovers:
+        try:
+            os.remove(path)
+        except OSError as exc:
+            log.debug("nao consegui remover %s: %s", path, exc)
+    return leftovers
+
+
+def history_from_snapshot(path: str) -> tuple[dict[str, str], dict[str, dict]]:
+    """Recupera `last_ok` e a ultima leitura boa de um `latest.json` anterior.
+
+    Sem isso um reinicio do coletor apagaria tudo da tela ate o primeiro ciclo — e o
+    primeiro ciclo pode falhar em todos os inversores. Os valores do arquivo passam a
+    ser o cache de partida, marcados com a hora em que foram lidos.
+    """
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return {}, {}
+    last_ok: dict[str, str] = {}
+    history: dict[str, dict] = {}
+    for name, entry in (data.get("devices") or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        at = entry.get("last_ok")
+        if not at:
+            continue
+        last_ok[name] = at
+        values = _cacheable(entry)
+        if not values:
+            continue
+        history[name] = {
+            "at": at,
+            "values": values,
+            "fields_at": {path: at for path, value in _leaves(values) if value is not None},
+        }
+    return last_ok, history
+
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Leitor local dos inversores (dongle Eybond)")
@@ -1225,11 +1275,29 @@ def main() -> int:
     ap.add_argument("--connect-timeout", type=float, default=DEFAULT_CONNECT_TIMEOUT,
                     help=f"segundos esperando o dongle conectar de volta (padrao {DEFAULT_CONNECT_TIMEOUT:.0f})")
     ap.add_argument("-v", "--verbose", action="store_true")
+    ap.add_argument("--log", default="data/collector.log",
+                    help="arquivo de log rotativo (vazio desliga); o console do servico fica oculto")
     ap.add_argument("--version", action="version", version=f"inverter-monitor {__version__}")
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s %(levelname)-7s %(message)s", datefmt="%H:%M:%S")
+
+    base = os.path.dirname(os.path.abspath(__file__))
+    out_path = os.path.join(base, args.out)
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+
+    log_path = os.path.join(base, args.log) if args.log else None
+    if log_path:
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        handler = RotatingFileHandler(log_path, maxBytes=1_000_000, backupCount=3,
+                                      encoding="utf-8")
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)-7s %(message)s"))
+        logging.getLogger().addHandler(handler)
+        log.info("=== iniciando %s (pid %d) ===", __version__, os.getpid())
+        leftovers = cleanup_tmp_files(out_path)
+        if leftovers:
+            log.warning("encerramento sujo anterior: %s", ", ".join(os.path.basename(p) for p in leftovers))
 
     if args.probe:
         proto, data = detect_protocol(args.probe)
@@ -1240,9 +1308,6 @@ def main() -> int:
     devices, rules = load_devices()
     for device in devices:
         device["connect_timeout"] = device.get("connect_timeout") or args.connect_timeout
-    base = os.path.dirname(os.path.abspath(__file__))
-    out_path = os.path.join(base, args.out)
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
     if args.once:
         data = poll_once(devices, rules)
@@ -1254,8 +1319,11 @@ def main() -> int:
         start_http(args.http)
 
     automation_state: dict[str, bool] = {}
-    last_ok: dict[str, str] = {}
-    history: dict[str, dict] = {}  # ultima leitura boa por inversor, para a UI nao apagar tudo
+    # Reiniciar nao pode apagar o painel: o que estava em disco vira o cache inicial.
+    last_ok, history = history_from_snapshot(out_path)
+    if history:
+        log.info("estado anterior recuperado de %s (%d inversores)",
+                 os.path.basename(out_path), len(history))
     _State.cycle = lambda: run_cycle(devices, rules, automation_state, last_ok, out_path, history)
     log.info("monitorando %d inversores a cada %.0fs (timeout %0.fs por dongle)",
              len(devices), args.interval, args.connect_timeout)
@@ -1277,7 +1345,12 @@ def main() -> int:
                     log.warning("%-14s offline: %s", name, d.get("error"))
             time.sleep(max(1.0, args.interval - (time.time() - t0)))
     except KeyboardInterrupt:
-        log.info("encerrando")
+        log.info("=== encerrando por interrupcao (pid %d) ===", os.getpid())
+    except BaseException:
+        # Sem console (tarefa agendada) um traceback sumiria; o log em arquivo guarda
+        # a causa para o proximo diagnostico.
+        log.exception("=== morrendo com erro inesperado (pid %d) ===", os.getpid())
+        raise
     return 0
 
 

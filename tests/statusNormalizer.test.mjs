@@ -111,7 +111,7 @@ test('normaliza uma entrada PV por MPPT e preserva a ilegivel', () => {
         grid: {},
       },
     },
-  }, [{ name: 'a' }, { name: 'b' }]);
+  }, [{ name: 'a' }, { name: 'b' }], { snapshotAgeSeconds: 0 });
 
   assert.deepEqual(result[0].pv.inputs, [
     { mppt: 1, voltage: 213.8, current: 2.6, power: 570, readable: true, reason: null, currentSource: null, staleSeconds: null },
@@ -182,7 +182,7 @@ test('offline preserva motivo e hora da ultima leitura', () => {
         last_ok: '2026-10-30T08:55:00-03:00',
       },
     },
-  }, [{ name: 'a' }]);
+  }, [{ name: 'a' }], { snapshotAgeSeconds: 0 });
 
   assert.equal(result[0].online, false);
   assert.match(result[0].error, /nao conectou/);
@@ -190,6 +190,45 @@ test('offline preserva motivo e hora da ultima leitura', () => {
   assert.equal(result[0].soc, null);
   assert.equal(result[0].stale.whole, false, 'sem cache nao ha o que mostrar como velho');
   assert.deepEqual(result[0].stale.fields, {});
+});
+
+test('snapshot velho invalida todos os valores, nao so o que faltou', async () => {
+  // Caso real (30/10, 18:55): o coletor morreu as 18:49 e a UI mostrou
+  // "Leitura atrasada" no topo, mas os cards com numeros de cara fresca.
+  const { StatusNormalizer } = await import('../src/domain/statusNormalizer.mjs');
+  const result = new StatusNormalizer().normalize({
+    timestamp: new Date(Date.now() - 381_000).toISOString(),
+    devices: {
+      a: {
+        online: true,
+        last_ok: new Date(Date.now() - 381_000).toISOString(),
+        battery: { soc: 62, voltage: 52.7 },
+        pv: { power: 1200, inputs: [{ mppt: 1, voltage: 300, current: 4, power: 1200, readable: true }] },
+        output: { active_power: 500 },
+        grid: {},
+        temperature: { inverter: 45 },
+      },
+    },
+  }, [{ name: 'a' }], { snapshotAgeSeconds: 381, staleAfterSeconds: 120 });
+
+  const device = result[0];
+  assert.equal(device.snapshotStale, true);
+  assert.equal(device.stale.whole, true, 'o arquivo inteiro esta velho');
+  assert.ok(device.stale.ageSeconds >= 381, `idade do snapshot (${device.stale.ageSeconds})`);
+  assert.ok(device.pv.inputs[0].staleSeconds >= 381, 'MPPT tambem envelhece');
+  assert.equal(device.soc, 62, 'o ultimo valor conhecido continua visivel');
+});
+
+test('snapshot recente nao marca nada como velho', async () => {
+  const { StatusNormalizer } = await import('../src/domain/statusNormalizer.mjs');
+  const result = new StatusNormalizer().normalize({
+    timestamp: new Date().toISOString(),
+    devices: { a: { online: true, battery: { soc: 50, voltage: 52 }, pv: {}, output: {}, grid: {} } },
+  }, [{ name: 'a' }], { snapshotAgeSeconds: 3, staleAfterSeconds: 120 });
+
+  assert.equal(result[0].snapshotStale, false);
+  assert.equal(result[0].stale.whole, false);
+  assert.equal(result[0].stale.ageSeconds, null);
 });
 
 const iso = (secondsAgo) => new Date(Date.now() - secondsAgo * 1000).toISOString();
@@ -224,7 +263,7 @@ test('valor do cache fica marcado com a idade, nao vira "nao exposto"', () => {
         },
       },
     },
-  }, [{ name: 'a' }]);
+  }, [{ name: 'a' }], { snapshotAgeSeconds: 0 });
 
   const mppt2 = result[0].pv.inputs[1];
   assert.equal(mppt2.readable, true, 'continua legivel: existe valor na tela');
@@ -262,7 +301,7 @@ test('card inteiro do cache e marcado como todo desatualizado', () => {
         },
       },
     },
-  }, [{ name: 'a' }]);
+  }, [{ name: 'a' }], { snapshotAgeSeconds: 0 });
 
   assert.equal(result[0].online, false);
   assert.equal(result[0].stale.whole, true);
@@ -287,7 +326,7 @@ test('leitura parcial marca so o campo que veio do cache', () => {
         cache: { at: iso(30), fields: { 'temperature.inverter': iso(30) } },
       },
     },
-  }, [{ name: 'a' }]);
+  }, [{ name: 'a' }], { snapshotAgeSeconds: 0 });
 
   const stale = result[0].stale;
   assert.equal(stale.whole, false, 'inversor respondeu: o card nao esta todo velho');

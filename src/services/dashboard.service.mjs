@@ -48,17 +48,25 @@ export class DashboardService {
       snapshotJson = parseJsonSafe(snapshot, {});
       collectorSource = 'snapshot_file';
     }
-    const devices = this.normalizer.normalize(snapshotJson, devicesConfig);
+    const snapshotAgeSeconds = this.#age(snapshotJson.timestamp);
+    const staleAfterSeconds = 120;
+    // A idade do snapshot entra na normalizacao: com o coletor parado, todos os
+    // valores da tela estao velhos, nao so os que faltaram no ultimo ciclo.
+    const devices = this.normalizer.normalize(snapshotJson, devicesConfig, {
+      snapshotAgeSeconds,
+      staleAfterSeconds,
+    });
     const rules = Array.isArray(userSettings.rules) ? userSettings.rules : [];
     const intentions = this.ruleEngine.evaluateAll(rules, devices, this.automationEnabled);
 
     return {
       snapshotTimestamp: snapshotJson.timestamp ?? null,
-      snapshotAgeSeconds: this.#age(snapshotJson.timestamp),
+      snapshotAgeSeconds,
       collectorSource,
       collector: {
         configuredSnapshot: this.snapshotFile,
-        staleAfterSeconds: 120,
+        staleAfterSeconds,
+        reachable: collectorSource === 'collector_api',
       },
       execution: {
         enabled: this.automationEnabled,
