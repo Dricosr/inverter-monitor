@@ -132,6 +132,66 @@ class TestUltimoValorValido(unittest.TestCase):
         self.assertNotIn("cache", depois["devices"]["x"], "nada foi reaproveitado")
         self.assertIsNone(depois["devices"]["x"]["grid"]["voltage"])
 
+    def test_anotacao_nao_vira_valor_velho(self):
+        """Anotar COMO um valor foi obtido nao pode envelhecer o MPPT inteiro.
+
+        Caso real (31/10 15:56 → 01/11): num ciclo o ASCII do `.106` falhou e a leitura
+        saiu so do mapa 0925, que anota `power_source`, `current_source` e
+        `current_partial`. Essas chaves nao existem no regime normal, entao o cache as
+        repunha todo ciclo — sempre com o carimbo de 15:56 — e o painel mostrava o MPPT1
+        como "sem atualizacao ha 19 h" com o inversor lendo normalmente.
+        """
+        history = {}
+        so_0925 = {
+            "protocol": "pi30_smg",
+            "battery": {"soc": 50, "voltage": 53.0},
+            "pv": {
+                "power": 500.0, "mppt": 1, "mppt_count": 2, "mppt_unreadable": [2],
+                "power_source": "soma dos MPPT",
+                "inputs": [
+                    {"mppt": 1, "voltage": 300.0, "current": 1.7, "power": 500,
+                     "readable": True, "power_source": "modbus 0925 (reg 4505)",
+                     "current_source": "derivada (W ÷ V)"},
+                    {"mppt": 2, "voltage": None, "current": None, "power": None,
+                     "readable": False, "reason": "0935 mudo"},
+                ],
+            },
+            "output": {"active_power": 200},
+            "modbus_smg": True,
+        }
+        completo = {
+            "protocol": "pi30_smg",
+            "battery": {"soc": 50, "voltage": 53.0},
+            "pv": {
+                "power": 600.0, "mppt": 1, "mppt_count": 2, "mppt_unreadable": [],
+                "inputs": [
+                    {"mppt": 1, "voltage": 300.0, "current": 2.0, "power": 600, "readable": True},
+                    {"mppt": 2, "voltage": 280.0, "current": 0.0, "power": 0, "readable": True},
+                ],
+            },
+            "output": {"active_power": 200},
+            "modbus_smg": True,
+        }
+
+        with mock.patch.object(im, "Dongle", FakeLink):
+            with mock.patch.dict(im.READERS, {"pi30_smg": lambda link: json.loads(json.dumps(so_0925))}):
+                im.poll_once([{"name": "x", "ip": "10.0.0.9", "protocol": "pi30_smg"}], {}, {}, {}, history)
+            with mock.patch.dict(im.READERS, {"pi30_smg": lambda link: json.loads(json.dumps(completo))}):
+                depois = im.poll_once([{"name": "x", "ip": "10.0.0.9", "protocol": "pi30_smg"}],
+                                      {}, {}, {}, history)
+
+        entrada = depois["devices"]["x"]
+        self.assertNotIn("cache", entrada, "nada faltou: a leitura foi completa")
+        self.assertNotIn("power_source", entrada["pv"])
+        self.assertNotIn("current_source", entrada["pv"]["inputs"][0])
+        self.assertEqual(entrada["pv"]["inputs"][0]["power"], 600)
+
+        # E as anotacoes nunca entram no historico, senao voltam no ciclo seguinte.
+        self.assertNotIn("modbus_smg", history["x"]["values"])
+        self.assertNotIn("power_source", history["x"]["values"]["pv"])
+        for path in history["x"]["fields_at"]:
+            self.assertNotRegex(path, r"power_source|current_source|current_partial|modbus_smg")
+
     def test_offline_mantem_o_ultimo_valor_e_diz_a_idade(self):
         history = {}
         self.poll(fake_reader_ok, history)

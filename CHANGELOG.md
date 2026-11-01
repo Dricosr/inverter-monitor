@@ -20,6 +20,29 @@ e versionamento [SemVer](https://semver.org/lang/pt-BR/).
 - **Liberação antes da aplicação no mesmo ciclo**: ao religar o host, as regras
   dependentes já podem agir no mesmo tick (antes perdiam um ciclo).
 
+## [1.4.4] — 2026-11-01
+
+### Corrigido
+
+- **O MPPT1 do `.106` aparecia "sem atualização há 19 h" com o inversor lendo normalmente.**
+  Em 31/10 às 15:55 o canal ASCII do `.106` respondeu `(NAKss` e a leitura saiu apenas do
+  mapa 0925 — e esse caminho **anota** a origem do valor (`pv.power_source`,
+  `pv.inputs[0].power_source`, `pv.inputs[0].current_source`, `battery.current_partial`,
+  `modbus_smg`). Essas chaves não existem no regime normal, então o cache de "último valor
+  válido" as repunha em **todo** ciclo com o carimbo de 15:56: a idade só crescia (19 h) e
+  o normalizador marcava o MPPT inteiro como velho, porque `pv.inputs.0.*` casava com o
+  prefixo da entrada.
+- Correção em duas camadas: o coletor **não cacheia anotações** (elas dizem *como* o valor
+  foi obtido, não *o que* foi lido) e o normalizador só deixa `voltage`/`current`/`power`
+  envelhecer um MPPT — uma anotação reaproveitada nunca mais pinta o visor de cinza.
+
+### Adicionado
+
+- `tests/test_poll.py::TestUltimoValorValido::test_anotacao_nao_vira_valor_velho` reproduz
+  a sequência exata (leitura só pelo 0925 e depois completa) e garante que nada sobra no
+  cache nem no histórico.
+- `tests/statusNormalizer.test.mjs` cobre o mesmo caso no lado do painel.
+
 ## [1.4.3] — 2026-10-31
 
 ### Corrigido

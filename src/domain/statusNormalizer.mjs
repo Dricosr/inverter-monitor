@@ -165,6 +165,10 @@ export class StatusNormalizer {
    * Uma entrada PV por MPPT: valores nulos continuam nulos (nao viram zero).
    * `staleFields` diz quais entradas vieram do cache e ha quanto tempo;
    * `wholeAge` marca todas quando o snapshot inteiro esta velho.
+   *
+   * So `voltage`/`current`/`power` envelhecem a entrada: uma anotacao reaproveitada
+   * (`power_source`, `current_source`) nao e um numero na tela e nao pode pintar o
+   * MPPT inteiro de cinza.
    */
   #pvInputs(value, staleFields = {}, wholeAge = null) {
     if (!Array.isArray(value)) return [];
@@ -172,8 +176,10 @@ export class StatusNormalizer {
       .map((entry, index) => ({ entry, index }))
       .filter(({ entry }) => entry && typeof entry === 'object')
       .map(({ entry, index }) => {
+        const prefix = `pv.inputs.${index}.`;
         const ages = Object.entries(staleFields)
-          .filter(([path]) => path.startsWith(`pv.inputs.${index}.`))
+          .filter(([path]) => path.startsWith(prefix)
+            && ['voltage', 'current', 'power'].includes(path.slice(prefix.length)))
           .map(([, age]) => age);
         if (wholeAge != null) ages.push(wholeAge);
         return {

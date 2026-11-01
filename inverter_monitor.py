@@ -57,7 +57,7 @@ DONGLE_UDP_PORT = 58899
 LOCAL_TCP_PORT = 8899  # porta em que o dongle conecta de volta (fixa no firmware)
 CLOUD_RECOVERY_DELAY = 1.5
 
-__version__ = "1.4.3"
+__version__ = "1.4.4"
 
 log = logging.getLogger("inverter")
 
@@ -873,9 +873,15 @@ def _now_iso() -> str:
 
 
 # Metadados do ciclo: nao sao leitura do inversor e nao devem ser herdados do cache.
+# `power_source`, `current_source`, `current_partial` e `modbus_smg` entram aqui pelo
+# mesmo motivo: dizem COMO o valor foi obtido, nao O QUE foi lido. Quando a leitura
+# volta ao regime normal eles deixam de existir — e herdar a anotacao antiga fazia a
+# UI anunciar "sem atualizacao ha 19 h" para uma explicacao, marcando junto o MPPT
+# inteiro (foi o que aconteceu com o `.106` em 01/11).
 CACHE_SKIP = {
     "online", "error", "last_ok", "ip", "protocol", "pn", "serial_trusted",
     "automation", "cache", "reason",
+    "power_source", "current_source", "current_partial", "modbus_smg",
 }
 
 

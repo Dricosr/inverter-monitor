@@ -285,6 +285,13 @@ Duas regras para o número não mentir:
 `não exposto` continua existindo, mas só quando é verdade: quando o aparelho nunca
 informou aquele campo.
 
+> **Anotação não é leitura.** Campos que dizem *como* o valor foi obtido —
+> `power_source`, `current_source`, `current_partial`, `modbus_smg`, `reason` — **não**
+> entram no cache: eles existem ou não existem conforme a fonte do ciclo e nunca devem
+> ganhar idade. Em 31/10 um deles (`pv.inputs.0.power_source`, de um ciclo em que só o
+> 0925 respondeu) ficou sendo reposto por 19 h e pintou o MPPT1 do `.106` como se o
+> inversor estivesse mudo, embora ele estivesse lendo normalmente.
+
 ## Automação por SOC
 
 Quatro ações independentes, todas disparadas pelo SOC de **um** inversor escolhido em cada

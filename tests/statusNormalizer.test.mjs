@@ -231,6 +231,39 @@ test('snapshot recente nao marca nada como velho', async () => {
   assert.equal(result[0].stale.ageSeconds, null);
 });
 
+test('anotacao reaproveitada nao marca a entrada PV como velha', async () => {
+  const { StatusNormalizer } = await import('../src/domain/statusNormalizer.mjs');
+  // Caso real do `.106` (01/11): `pv.inputs.0.power_source` voltou do cache com o
+  // carimbo de 19 h antes, e o normalizador marcava o MPPT1 inteiro como velho.
+  const result = new StatusNormalizer().normalize({
+    timestamp: new Date().toISOString(),
+    devices: {
+      a: {
+        online: true,
+        battery: { soc: 100, voltage: 56.4 },
+        pv: {
+          power: 600,
+          inputs: [{ mppt: 1, voltage: 300, current: 2, power: 600, readable: true }],
+        },
+        output: { active_power: 200 },
+        grid: {},
+        cache: {
+          at: iso(71_871),
+          fields: {
+            'pv.inputs.0.power_source': iso(71_871),
+            'pv.inputs.0.current_source': iso(71_871),
+            'battery.current_partial': iso(71_871),
+          },
+        },
+      },
+    },
+  }, [{ name: 'a' }], { snapshotAgeSeconds: 2 });
+
+  assert.equal(result[0].pv.inputs[0].staleSeconds, null, 'os numeros do MPPT vieram agora');
+  assert.equal(result[0].pv.power, 600, 'o total nao e remarcado por causa de anotacao');
+  assert.equal(result[0].stale.fields['pv.power'], undefined);
+});
+
 const iso = (secondsAgo) => new Date(Date.now() - secondsAgo * 1000).toISOString();
 
 test('valor do cache fica marcado com a idade, nao vira "nao exposto"', () => {
