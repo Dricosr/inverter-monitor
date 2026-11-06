@@ -3,22 +3,47 @@
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 e versionamento [SemVer](https://semver.org/lang/pt-BR/).
 
-## [1.4.1] — 2026-10-31
+## [1.5.0] — 2026-11-06
+
+### Alterado
+
+- **A mineração do ai-node deixou de ser comando remoto e virou pedido ao Gate.** O
+  executor não abre mais SSH: ele publica `POST /v1/mining/intent` com
+  `{ allow:false, stop:true }` (segurar) ou `{ allow:true }` (liberar) e lê o estado por
+  `GET /v1/mining`. Quem decide continua sendo o Gate — a IA sempre vence.
+  - Motivo: `sudo -n ainode-mining-mode normal` derrubava em segundos o limite que o Gate
+    aplicava para ceder CPU ao Strata, e a mineração voltava aos 28 threads no meio de uma
+    inferência. **Medido no nó em 06/11/2026**: mesmo com 1 núcleo de CPUQuota o decode do
+    Strata cai ~50 % (17 → 9,3 tok/s) — a disputa é por **banda de memória**, não só CPU.
+    Por isso o pedido passou a ser **parar**, não reduzir.
+  - O pedido tem TTL no Gate e é renovado a cada avaliação: se o monitor morrer, a
+    mineração volta ao padrão em vez de ficar travada.
+  - `desiredIntensity` deixou de ter efeito nesta ação (só a EP2 usa).
+- **UI**: a opção virou `Parar mineração do ai-node (pedido ao Gate)`, o campo de
+  intensidade só aparece para a EP2, e o card de integração mostra o motivo do governador
+  (`mineração parada — Strata gerando (thinking)`). Chip da regra passa a `Parada`.
 
 ### Corrigido
 
-- **O botão `Cancelar` não fechava os diálogos.** Ele era um `button` sem `type`, logo um
-  `submit`; como o formulário tem campos `required` vazios, a validação barrava o submit e
-  o `method="dialog"` nunca fechava — a janela só saía com `Esc`. Agora `Cancelar` é
-  `type="button"` e fecha explicitamente (regra **e** renomear inversor).
-- **Regra bloqueada não é regra com falha.** Com o ai-node desligado de propósito pela
-  regra de energia, `gate_pause` e `ainode_mining_reduce` tentavam SSH/HTTP e a tela
-  mostrava `Falha` + `2 ações falharam`. O host agora é rastreado
-  (`state.hosts`): as ações que dependem dele ficam `Bloqueada · ai-node desligado pela
-  regra "..."`, sem tentativa e sem vermelho. O Gate entra como dependente do ai-node
-  automaticamente quando `GATE_BASE_URL` aponta para `AINODE_ADDRESS`.
-- **Liberação antes da aplicação no mesmo ciclo**: ao religar o host, as regras
-  dependentes já podem agir no mesmo tick (antes perdiam um ciclo).
+- **`applied` na liberação**: o novo executor devolvia `applied: true` sempre, então a
+  regra nunca ficava alinhada ao liberar e reabria a janela de confirmação a cada ciclo
+  (com `confirmSeconds > 0` ficaria em `Confirmando` para sempre). Agora `applied` reflete
+  "a automação está segurando o recurso".
+- **CHANGELOG fora de ordem**: as seções 1.4.1 a 1.4.4 estavam com a 1.4.1 no topo.
+- **O vigia agora cobre o painel, não só o coletor.** `Stop-ScheduledTask` não mata o
+  processo filho: o node do painel ficou **órfão segurando a 3071 por cinco dias** (tarefa
+  `Running`, código de 01/11 em memória) e `install-ui.ps1` "reiniciava" sem efeito. O
+  vigia passou a: (a) encerrar o **PID dono da porta** antes de subir nova instância;
+  (b) reiniciar a UI quando `src/`, `public/` ou `package.json` estiverem mais novos que o
+  processo; (c) detectar porta 3071 fora do ar. Verificado: tocar um arquivo fez o painel
+  ser reiniciado em ~20 s, com o órfão elevado encerrado corretamente.
+
+### Repositório
+
+- `.gitignore` passou a cobrir os logs rotativos (`*.log.*`) — `data/collector.log.1` e
+  companhia apareciam como não rastreados.
+- `tests/aiNodeMining.test.mjs` cobre o contrato novo: corpo do pedido, leitura prévia do
+  estado, `applied` na liberação, erro HTTP do Gate e Gate fora do ar.
 
 ## [1.4.4] — 2026-11-01
 
@@ -70,6 +95,23 @@ e versionamento [SemVer](https://semver.org/lang/pt-BR/).
   sufixo vem de `soc_on`/`soc_off` do `devices.json` e não tem relação com a automação do
   painel (que desliga o ai-node, o Gate e a mineração). A documentação do `devices.json`
   agora diz isso explicitamente.
+
+## [1.4.1] — 2026-10-31
+
+### Corrigido
+
+- **O botão `Cancelar` não fechava os diálogos.** Ele era um `button` sem `type`, logo um
+  `submit`; como o formulário tem campos `required` vazios, a validação barrava o submit e
+  o `method="dialog"` nunca fechava — a janela só saía com `Esc`. Agora `Cancelar` é
+  `type="button"` e fecha explicitamente (regra **e** renomear inversor).
+- **Regra bloqueada não é regra com falha.** Com o ai-node desligado de propósito pela
+  regra de energia, `gate_pause` e `ainode_mining_reduce` tentavam SSH/HTTP e a tela
+  mostrava `Falha` + `2 ações falharam`. O host agora é rastreado
+  (`state.hosts`): as ações que dependem dele ficam `Bloqueada · ai-node desligado pela
+  regra "..."`, sem tentativa e sem vermelho. O Gate entra como dependente do ai-node
+  automaticamente quando `GATE_BASE_URL` aponta para `AINODE_ADDRESS`.
+- **Liberação antes da aplicação no mesmo ciclo**: ao religar o host, as regras
+  dependentes já podem agir no mesmo tick (antes perdiam um ciclo).
 
 ## [1.4.0] — 2026-10-31
 

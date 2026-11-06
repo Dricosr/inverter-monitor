@@ -248,8 +248,8 @@ então desenha a tela, então o tempo volta a `Há 0 s`. Durante a espera — o 
   `Falha`, `Desligada`, `Sem leitura`, `Mantida`, `Confirmando`, `Sem leitura confiável`);
 - campo **Confirmar por (segundos)** no formulário: `0` age na hora, `120` exige que o
   gatilho se mantenha por 2 minutos;
-- estado real dos alvos (fila do Gate, threads do XMRig, CPUQuota do ai-node) e hash
-  rate de agora, 1 min e 15 min;
+- estado real dos alvos (fila do Gate, threads do XMRig da EP2, governador de mineração do
+  ai-node) e hash rate de agora, 1 min e 15 min;
 - último resultado de cada regra visível na linha, com o detalhe técnico no tooltip.
 
 ### Leitura velha não apaga o painel
@@ -301,12 +301,48 @@ regra:
 | --- | --- | --- |
 | `gate_pause` | `POST /v1/admin/pausar` no Gate (fila de jobs) | `POST /v1/admin/retomar` |
 | `ep2_mining_reduce` | XMRig da EP2 reiniciado com menos threads | restaura as threads do perfil |
-| `ainode_mining_reduce` | `ainode-mining-mode ai <percentual>` via SSH | `ainode-mining-mode normal` |
+| `ainode_mining_reduce` | **pede** ao Gate para parar a mineração (`POST /v1/mining/intent`) | pede para liberar (`allow: true`) |
 | `ainode_power_off` | `systemctl poweroff` no ai-node | religa por **Wake-on-LAN** |
 
-Cada regra tem `activateBelow`, `resumeAbove`, `desiredIntensity` e `confirmSeconds`
-próprios, e todos são configuráveis pela interface (validação: 0–100 e
-`resumeAbove > activateBelow`).
+Cada regra tem `activateBelow`, `resumeAbove` e `confirmSeconds` próprios, mais
+`desiredIntensity` — que hoje **só a EP2 usa** (threads do XMRig). Todos configuráveis
+pela interface (validação: 0–100 e `resumeAbove > activateBelow`).
+
+> A regra da EP2 tem alcance diferente das demais: `ep2_mining_reduce` é a única que
+> **executa** um comando (reinicia o XMRig com `--threads=N`). No ai-node o monitor apenas
+> **pede** — quem decide a cota é o Gate.
+
+### Mineração do ai-node: pedido, não comando
+
+O monitor **não** mexe mais na mineração do ai-node por SSH. Ele publica um **pedido** e o
+Gate decide:
+
+```jsonc
+// POST /v1/mining/intent
+{ "allow": false, "stop": true, "reason": "energia: sem excedente para minerar",
+  "source": "inverter-monitor" }        // segurar
+{ "allow": true, "reason": "energia: excedente liberado",
+  "source": "inverter-monitor" }        // liberar
+```
+
+Por que mudou: comando remoto (`ainode-mining-mode ai 20`) derrubava em segundos o limite
+que o Gate tinha aplicado para ceder a CPU ao Strata — a mineração voltava aos 28 threads no
+meio de uma inferência. E a redução por cota não resolvia: **medido no nó em 06/11/2026**,
+mesmo com 1 núcleo de CPUQuota o decode do Strata cai ~50 % (17 → 9,3 tok/s), porque a
+mineração disputa **banda de memória**, não só CPU. Por isso o pedido passou a ser
+**parar**.
+
+Consequências visíveis no painel:
+
+| Situação | O painel mostra |
+| --- | --- |
+| Pedido de parada aceito, IA parada | `mineracao PARADA pelo Gate` |
+| IA rodando | `mineração parada — Strata gerando (thinking)` (a IA vence) |
+| Pedido enviado, Gate ainda segurando por conta da IA | `pedido ao Gate: parar a mineração (ela segue rodando: …)` |
+| SOC subiu | `pedido ao Gate: liberar (mineracao: …)` |
+
+O pedido tem **TTL no Gate** e é renovado a cada avaliação do monitor: se este app morrer,
+a mineração volta ao padrão sozinha em vez de ficar travada.
 
 ### Desligar o ai-node (energia)
 
@@ -402,11 +438,23 @@ diferença é corrigida no ciclo seguinte.
 # estado real dos alvos
 Invoke-RestMethod http://192.168.18.150:3070/v1/status | Select-Object -ExpandProperty gate
 Invoke-RestMethod http://127.0.0.1:18092/2/backends | ConvertTo-Json -Depth 4   # threads reais
-ssh ai-node '/usr/local/sbin/ainode-mining-mode status'                        # CPUQuota
+Invoke-RestMethod http://192.168.18.150:3070/v1/mining | Select-Object -ExpandProperty governor
 ssh ai-node 'sudo -n ethtool enp8s0 | grep Wake-on'                           # WOL armado?
 
 # o que a automação decidiu/aplicou
 Invoke-RestMethod http://127.0.0.1:3071/api/dashboard | Select-Object -ExpandProperty execution
+```
+
+Testar o pedido de mineração sem esperar o SOC cair:
+
+```powershell
+# segurar (o Gate decide; com IA rodando ele mantém parado)
+Invoke-RestMethod http://192.168.18.150:3070/v1/mining/intent -Method Post -ContentType application/json `
+  -Body '{"allow":false,"stop":true,"reason":"teste","source":"manual"}'
+
+# liberar
+Invoke-RestMethod http://192.168.18.150:3070/v1/mining/intent -Method Post -ContentType application/json `
+  -Body '{"allow":true,"reason":"teste","source":"manual"}'
 ```
 
 Testar o desligamento/religamento sem esperar o SOC cair (o `ai-node` vai desligar de
@@ -556,7 +604,9 @@ curl -s http://localhost:8080/status/inversor-59 | jq .pv
 | `/api/rules/<id>` | PUT / DELETE | Atualiza ou exclui uma regra |
 | `/health` | GET | `{"ok": true, "port": 3071, "automationEnabled": true}` |
 
-`action` aceita `gate_pause`, `ep2_mining_reduce` ou `ainode_mining_reduce`.
+`action` aceita `gate_pause`, `ep2_mining_reduce`, `ainode_mining_reduce` ou
+`ainode_power_off`. `desiredIntensity` só tem efeito em `ep2_mining_reduce`;
+`confirmSeconds` vale para todas (ver [janela de confirmação](#janela-de-confirmação-confirmseconds)).
 
 Do `/api/dashboard`, além de `devices`, `rules`, `intentions` e `integrations`:
 
@@ -737,23 +787,34 @@ Start-ScheduledTask -TaskName InverterMonitorCollector   # reiniciar após mudan
 Get-ScheduledTaskInfo -TaskName InverterMonitorCollector | Select-Object LastRunTime, LastTaskResult
 ```
 
-### Vigia do coletor (`InverterMonitorWatchdog`)
+### Vigia do coletor e do painel (`InverterMonitorWatchdog`)
 
 O Agendador só reinicia uma tarefa em caso de **falha** — um processo que morre com
-código 0 fica morto. Em 30/10 foi exatamente o que aconteceu: o coletor sumiu às 18:49 e
-a leitura parou por 6 minutos. O vigia cobre esse buraco:
+código 0 fica morto — e `Stop-ScheduledTask` não mata o processo filho, que pode ficar
+órfão segurando a porta. Em 30/10 o coletor sumiu às 18:49 e a leitura parou por 6
+minutos; em 06/11 o painel estava havia cinco dias rodando o código de 01/11. O vigia
+cobre os dois casos:
 
 ```powershell
 pwsh -File scripts\watchdog.ps1              # roda uma vez (silencioso se estiver tudo bem)
 pwsh -File scripts\watchdog.ps1 -MaxAgeSeconds 300
 ```
 
-Registrado a cada **2 minutos**, ele reinicia o coletor quando:
+Registrado a cada **2 minutos**, ele vigia **coletor e painel**:
 
-| Sintoma | Significado |
-| --- | --- |
-| porta 8080 não escuta | o processo morreu (inclusive com código 0) |
-| snapshot parado há mais de 180 s | o processo vive, mas travou num ciclo (dongle mudo) |
+| Sintoma | Alvo | Significado |
+| --- | --- | --- |
+| porta 8080 não escuta | coletor | o processo morreu (inclusive com código 0) |
+| snapshot parado há mais de 180 s | coletor | o processo vive, mas travou num ciclo (dongle mudo) |
+| porta 3071 não escuta | painel | o node do painel morreu |
+| `src/`, `public/` ou `package.json` mais novos que o processo | painel | está rodando **código anterior ao do disco** |
+
+Os dois últimos casos existem por um motivo concreto: `Stop-ScheduledTask` **não mata o
+processo filho**. O node do painel ficou órfão segurando a 3071 por cinco dias, com a
+tarefa marcada como `Running`, e `deploy\install-ui.ps1` "reiniciava" sem efeito — o
+painel seguia com o código de 01/11. O vigia resolve os dois: encerra o **PID dono da
+porta** antes de subir a nova instância e reinicia quando o código no disco é mais novo que
+o processo.
 
 O que aconteceu fica em `data/watchdog.log`; o que o coletor fez fica em
 `data/collector.log` (rotativo, 1 MB × 3). Nada é registrado enquanto está tudo bem.
@@ -762,6 +823,9 @@ O que aconteceu fica em `data/watchdog.log`; o que o coletor fez fica em
 Get-Content data\watchdog.log -Tail 10      # reinícios automáticos
 Get-Content data\collector.log -Tail 20     # ciclos, erros e encerramentos
 ```
+
+> Ao mexer no código, não é preciso reiniciar nada à mão: em até 2 minutos o vigia percebe
+> o arquivo novo e reinicia o painel. Para ver na hora, rode `pwsh -File scripts\watchdog.ps1`.
 
 O coletor também recupera o estado anterior ao subir: `history_from_snapshot()` lê o
 `latest.json` e o que estava na tela volta **em cinza**, com a idade, em vez de sumir

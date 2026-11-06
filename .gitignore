@@ -10,3 +10,4 @@ data/*.tmp
 node_modules/
 logs/
 *.log
+*.log.*

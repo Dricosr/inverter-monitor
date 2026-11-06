@@ -56,7 +56,8 @@ const ACTION_HINTS = {
   },
   ainode_mining_reduce: {
     target: 'ai-node',
-    text: 'Limita a CPU do XMRig do ai-node por cgroup, na intensidade escolhida abaixo.',
+    text: 'Pede ao Gate para parar a mineração do ai-node; ao subir o SOC, pede para liberar. '
+      + 'Quem decide é o Gate — com a IA rodando, a mineração fica parada mesmo com bateria sobrando.',
   },
   ainode_power_off: {
     target: 'ai-node',
@@ -513,7 +514,10 @@ function renderIntegrations(dashboard) {
       data: ai,
       rule: aiRule,
       action: dashboard.execution?.actions?.[aiRule?.id],
-      reducedFoot: (intensity) => `Alvo de ${intensity}% de 1 CPU`,
+      // O pedido é binário: parar ou liberar. A cota quem decide é o Gate (a IA vence).
+      reducedFoot: () => (ai.governor?.stopped === true
+        ? `Mineração parada${ai.governor?.reason ? ` — ${ai.governor.reason}` : ''}`
+        : 'pedido de parada enviado ao Gate'),
       governor: ai.governor,
     }),
   ].join('');
@@ -567,7 +571,7 @@ function miningCard({ title, data, rule, action, reducedFoot, governor }) {
   const notes = [];
   const intensity = Number(rule?.desiredIntensity);
   if (threadsReduced) notes.push(`${data.threads} de ${data.maxThreads} threads`);
-  else if (reduced && Number.isFinite(intensity)) notes.push(reducedFoot(intensity));
+  else if (reduced && (Number.isFinite(intensity) || governor)) notes.push(reducedFoot(intensity));
   if (rule && !rule.enabled) notes.push('regra de redução desligada');
   if (reduced && !rule?.enabled) notes.push('redução fora da automação');
   if (governor?.mode) notes.push(`governador do Gate: ${governor.mode}`);
@@ -691,12 +695,16 @@ function ruleState(rule, execution, source) {
 }
 
 function activeLabel(action) {
-  return action === 'gate_pause' ? 'Pausado' : action === 'ainode_power_off' ? 'Desligado' : 'Reduzido';
+  if (action === 'gate_pause') return 'Pausado';
+  if (action === 'ainode_power_off') return 'Desligado';
+  if (action === 'ainode_mining_reduce') return 'Parada';
+  return 'Reduzido';
 }
 
 function activeNote(rule) {
   if (rule.action === 'gate_pause') return 'Fila pausada';
   if (rule.action === 'ainode_power_off') return 'ai-node desligado';
+  if (rule.action === 'ainode_mining_reduce') return 'Mineração parada (pedido ao Gate)';
   const intensity = Number(rule.desiredIntensity);
   return Number.isFinite(intensity) ? `Minerador em ${intensity}%` : 'Minerador reduzido';
 }
@@ -836,9 +844,13 @@ function syncRuleDialog() {
   const hint = ACTION_HINTS[action];
   elements.ruleHint.innerHTML = `<span class="chip chip--muted">${escapeHtml(hint.target)}</span><p>${escapeHtml(hint.text)}</p>`;
 
-  const usesIntensity = action === 'ep2_mining_reduce' || action === 'ainode_mining_reduce';
+  // A intensidade só vale para a EP2 (threads do XMRig). A mineração do ai-node virou
+  // pedido binário ao Gate (parar/liberar), então o campo sai de cena para não prometer
+  // um ajuste fino que ninguém aplica.
+  const usesIntensity = action === 'ep2_mining_reduce';
   elements.ruleIntensityField.hidden = !usesIntensity;
   elements.ruleConfirmField.hidden = false;
+  if (!usesIntensity) document.querySelector('#rule-intensity').value = '';
   elements.ruleIntensityField.closest('.form-grid').classList.toggle('two', !usesIntensity);
 
   const activate = Number(document.querySelector('#rule-activate').value);

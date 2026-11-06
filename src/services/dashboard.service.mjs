@@ -166,13 +166,13 @@ export class DashboardService {
       },
       {
         id: 'ainode-mining-low-battery',
-        name: 'Reduzir mineração do ai-node',
+        name: 'Parar mineração do ai-node',
         enabled: false,
         action: 'ainode_mining_reduce',
         sourceDeviceId: 'anenji-6k2',
         activateBelow: 50,
         resumeAbove: 55,
-        desiredIntensity: 25,
+        desiredIntensity: null,
       },
       {
         id: 'ainode-power-low-battery',

@@ -55,7 +55,7 @@ export class AutomationService {
         configPath: ep2XmrigConfig,
         token: ep2XmrigToken,
       }),
-      ainode_mining_reduce: new AiNodeMiningActionExecutor(aiNode.host),
+      ainode_mining_reduce: new AiNodeMiningActionExecutor(gateUrl),
       ainode_power_off: new AiNodePowerActionExecutor(aiNode),
     };
     this.rulesProvider = rulesProvider ?? (async () => {
