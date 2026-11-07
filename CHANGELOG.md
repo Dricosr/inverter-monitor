@@ -3,6 +3,55 @@
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 e versionamento [SemVer](https://semver.org/lang/pt-BR/).
 
+## [1.6.0] — 2026-11-07
+
+### Corrigido
+
+- **O `.106` falhava em ~70 % dos ciclos e o painel ficava defasado.** Investigação
+  medida no próprio hardware (não por suposição):
+  - **`Dongle._open` aceitava o dongle errado.** Os três dongles aprendem o endereço local
+    no primeiro `set>server=` e passam a reconectar **para sempre** na porta 8899 — a
+    varredura flagrou 11 conexões em 30 s vindas de `.33`, `.59` e `.106`. Como o código
+    fazia um único `accept()` e só *avisava* se o IP fosse outro, a sessão pedida para o
+    `.106` podia ser entregue ao dongle do `.33`: as respostas vinham `(NAKss` ou lixo e o
+    inversor aparecia offline. Agora só é aceita a conexão cujo IP é o pedido; as demais
+    são fechadas e contadas no log.
+  - **Bytes residuais da sessão anterior.** Ao reconectar, o dongle pode entregar o resto
+    de um frame antigo; `ask` descartava esse frame por `tid` e perdia a resposta boa.
+    `Dongle._drain()` limpa o socket logo após o `accept`.
+  - **`_modbus_block_le` não conferia a contagem.** Um bloco truncado virava lista curta e
+    silenciosa, e o parser devolvia `None` para tudo — o painel publicava "MPPT não
+    exposto" como se fosse leitura. Agora levanta `bloco 4501+64 veio truncado (N de 64)` e
+    repete, igual ao caminho big-endian.
+  - **Insistir na mesma sessão não funcionava.** Medido: a partir de uma sessão nova o
+    dongle entrega tudo (`QPIGS` em 860 ms, `QMOD`, `QID` e o bloco de 64 registradores);
+    na sessão contaminada são 10/10 falhas, mesmo com 3 tentativas de comando. `read_device`
+    passou a **trocar de sessão** (fechar, assentar 0,5 s / 1 s, reabrir) em vez de repetir
+    o comando.
+  - **`QMOD`/`QID` a cada ciclo** gastavam duas idas ao dongle e duas chances de colisão
+    por nada — são quase estáticos. Entraram num cache de 10 min.
+
+### Adicionado
+
+- **Backoff por inversor**: depois de uma falha o dispositivo é pulado por 15 s, 30 s e
+  então 60 s (teto), em vez de ser martelado a cada ciclo. Medido antes/depois: **30 % →
+  94 %** de ciclos completos em produção.
+- **Estado `backoff` no snapshot/dashboard** e chip **`<nome> recuperando`** no painel. Um
+  dongle em recuperação não é mais mostrado como falha vermelha: o card mantém os últimos
+  valores, em cinza com a idade, e o aviso diz `Recuperando a leitura do dongle (nova
+  tentativa em Ns)`.
+
+### Diagnóstico (para repetir a investigação)
+
+O `.106` respondeu **NAK em ~430 ms em todos os `dev` de 0 a 4** (tempo fixo demais para
+ser o inversor) e frame **vazio em 8,13 s** em todos os comandos, ASCII e Modbus, inclusive
+**numa sessão mantida aberta por 120 s e após 6 min de repouso**. Ao mesmo tempo o dongle
+conectava em 0,1 s (livre, não ocupado) e o `.33`/`.59` liam 5/5. Ou seja: nesses períodos
+o **canal RS485 entre dongle e inversor não responde**, e em janelas boas ele entrega
+tudo — o que aponta para o enlace físico (cabo/conector RS485 ou UART do dongle), não para
+o software. As correções acima são o máximo que o software pode garantir: ler certo quando
+o enlace responde, e não insistir quando ele está mudo.
+
 ## [1.5.0] — 2026-11-06
 
 ### Alterado

@@ -43,6 +43,7 @@ import copy
 import glob
 import json
 import logging
+import math
 import os
 import socket
 import struct
@@ -57,7 +58,7 @@ DONGLE_UDP_PORT = 58899
 LOCAL_TCP_PORT = 8899  # porta em que o dongle conecta de volta (fixa no firmware)
 CLOUD_RECOVERY_DELAY = 1.5
 
-__version__ = "1.5.0"
+__version__ = "1.6.0"
 
 log = logging.getLogger("inverter")
 
@@ -124,6 +125,14 @@ class Dongle:
             s.close()
 
     def _open(self, connect_timeout: float) -> None:
+        """Espera o callback **deste** dongle, descartando os dos outros.
+
+        Todos os dongles da casa aprendem o endereco local no primeiro `set>server=`
+        e passam a reconectar nele para sempre. Como os tres usam a mesma porta 8899,
+        aceitar a primeira conexao que chega entregava a sessao do `.106` para o
+        dongle do `.33`: as respostas vinham NAK ou lixo e o inversor aparecia
+        offline metade das vezes. Aqui so vale a conexao cujo IP e o pedido.
+        """
         srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
@@ -131,29 +140,75 @@ class Dongle:
         except OSError as exc:
             srv.close()
             raise RuntimeError(f"porta {LOCAL_TCP_PORT} ocupada (outra instancia rodando?)") from exc
-        srv.listen(2)
+        srv.listen(8)
         myip = self._local_ip()
         deadline = time.time() + connect_timeout
         conn = None
+        last_trigger = 0.0
+        intrusos: set[str] = set()
         while conn is None:
-            u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            now = time.time()
+            if now >= deadline:
+                srv.close()
+                extra = f" (descartados: {', '.join(sorted(intrusos))})" if intrusos else ""
+                raise TimeoutError(
+                    f"{self.ip} nao conectou de volta em {connect_timeout:.0f}s{extra}")
+            # Reenvia o gatilho a cada 2 s: um dongle que perdeu o pacote UDP ainda
+            # esta reconectando sozinho, mas o gatilho acelera o primeiro contato.
+            if now - last_trigger >= 2.0:
+                u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                try:
+                    u.sendto(f"set>server={myip}:{LOCAL_TCP_PORT};".encode(),
+                             (self.ip, DONGLE_UDP_PORT))
+                finally:
+                    u.close()
+                last_trigger = now
+            srv.settimeout(min(1.0, max(0.2, deadline - now)))
             try:
-                u.sendto(f"set>server={myip}:{LOCAL_TCP_PORT};".encode(),
-                         (self.ip, DONGLE_UDP_PORT))
-            finally:
-                u.close()
-            srv.settimeout(min(3.0, max(0.5, deadline - time.time())))
-            try:
-                conn, addr = srv.accept()
+                candidate, addr = srv.accept()
             except socket.timeout:
-                if time.time() >= deadline:
-                    srv.close()
-                    raise TimeoutError(f"{self.ip} nao conectou de volta em {connect_timeout:.0f}s")
+                continue
+            if addr[0] != self.ip:
+                intrusos.add(addr[0])
+                log.debug("descartando conexao de %s (esperado %s)", addr[0], self.ip)
+                try:
+                    candidate.close()
+                except OSError:
+                    pass
+                continue
+            conn = candidate
         srv.close()
-        if addr[0] != self.ip:
-            log.warning("callback de %s (esperado %s)", addr[0], self.ip)
+        if intrusos:
+            log.debug("%s: %d conexoes de outros dongles descartadas (%s)",
+                      self.ip, len(intrusos), ", ".join(sorted(intrusos)))
         self.sock = conn
+        self._drain()
         self.sock.settimeout(self.reply_timeout)
+
+    def _drain(self) -> None:
+        """Descarta o que chegou antes da primeira pergunta.
+
+        Ao reconectar, o dongle pode entregar o resto de um frame da sessao
+        anterior. Sem isso `ask` le um frame com tid antigo, descarta, e a resposta
+        de verdade chega fora do prazo.
+        """
+        self.buf = b""
+        try:
+            self.sock.setblocking(False)
+            while True:
+                try:
+                    chunk = self.sock.recv(4096)
+                except (BlockingIOError, InterruptedError):
+                    break
+                except OSError:
+                    break
+                if not chunk:
+                    break
+        finally:
+            try:
+                self.sock.setblocking(True)
+            except OSError:
+                pass
 
     def _next_tid(self) -> int:
         self.tid = 0xE000 + (self.tid + 1 - 0xE000) % 0x1000
@@ -260,14 +315,33 @@ SMG_BASE = 4501
 SMG_COUNT = 64
 
 
-def _modbus_block_le(link: Dongle, start: int, count: int, slave: int) -> list[int]:
-    """Bloco Modbus com os bytes de cada registrador invertidos."""
-    time.sleep(MODBUS_GAP)
-    body = link.ask(4, rtu_read(slave, start, count))
-    if len(body) < 5 or body[1] & 0x80:
-        raise ValueError(f"resposta Modbus invalida: {body.hex(' ')}")
-    data = body[3:3 + body[2]]
-    return [data[i] | (data[i + 1] << 8) for i in range(0, len(data) - 1, 2)]
+def _modbus_block_le(link: Dongle, start: int, count: int, slave: int,
+                     attempts: int = 2) -> list[int]:
+    """Bloco Modbus com os bytes de cada registrador invertidos.
+
+    Confere a contagem como `_required_block`: um bloco truncado nao pode virar uma
+    lista curta e silenciosa. Sem isso o parser devolvia `None` para tudo e o painel
+    publicava "MPPT nao exposto" (ou nada) como se fosse leitura valida.
+    """
+    last: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        time.sleep(MODBUS_GAP)
+        try:
+            body = link.ask(4, rtu_read(slave, start, count))
+            if len(body) < 5 or body[1] & 0x80:
+                raise ValueError(f"resposta Modbus invalida: {body.hex(' ')}")
+            data = body[3:3 + body[2]]
+            regs = [data[i] | (data[i + 1] << 8) for i in range(0, len(data) - 1, 2)]
+            if len(regs) < count:
+                raise ValueError(
+                    f"bloco {start}+{count} veio truncado ({len(regs)} de {count} registradores)")
+            return regs
+        except Exception as exc:  # noqa: BLE001
+            last = exc
+            if attempt == attempts:
+                raise
+            time.sleep(0.2)
+    raise last if last else RuntimeError("sem resposta")
 
 
 def read_modbus_smg(link: Dongle, slave: int = SMG_SLAVE) -> dict:
@@ -641,17 +715,38 @@ def _pi30_ask(link: Dongle, command: bytes, timeout: float, attempts: int = 3) -
     raise last if last else RuntimeError("sem resposta")
 
 
+# Modo e serial quase nao mudam: perguntar a cada ciclo gasta duas idas ao dongle
+# (e cada ida e uma chance de colidir no RS485). Ficam em cache por 10 min.
+STATIC_TTL = 600.0
+_static_cache: dict[str, dict] = {}
+
+
 def read_pi30(link: Dongle) -> dict:
-    """Familia PI30 (ASCII): QPIGS + QMOD + QID."""
-    raw = _pi30_ask(link, b"QPIGS", timeout=12)
-    try:
-        mode_letter = _pi30_ask(link, b"QMOD", timeout=6, attempts=2)[1:2]
-    except Exception:
+    """Familia PI30 (ASCII): QPIGS + QMOD + QID.
+
+    `QPIGS` e o unico comando que precisa vir sempre; modo e serial vem do cache e so
+    sao reconsultados quando vencem (ou quando o cache esta vazio).
+    """
+    raw = _pi30_ask(link, b"QPIGS", timeout=12, attempts=2)
+
+    cache = _static_cache.get(link.ip)
+    agora = time.time()
+    if not cache or agora - cache.get("at", 0) > STATIC_TTL:
         mode_letter = "?"
-    try:
-        serial = _pi30_ask(link, b"QID", timeout=6, attempts=2)[1:-3]
-    except Exception:
         serial = None
+        try:
+            mode_letter = _pi30_ask(link, b"QMOD", timeout=6, attempts=1)[1:2]
+        except Exception:  # noqa: BLE001
+            mode_letter = cache.get("mode", "?") if cache else "?"
+        try:
+            serial = _pi30_ask(link, b"QID", timeout=6, attempts=1)[1:-3]
+        except Exception:  # noqa: BLE001
+            serial = cache.get("serial") if cache else None
+        _static_cache[link.ip] = {"mode": mode_letter, "serial": serial, "at": agora}
+    else:
+        mode_letter = cache.get("mode", "?")
+        serial = cache.get("serial")
+
     return parse_qpigs(raw, mode_letter, serial)
 
 
@@ -851,6 +946,9 @@ DEFAULT_CONNECT_TIMEOUT = 10.0  # curto de proposito: um dongle fora do ar nao p
 # travar o ciclo inteiro. Com 25 s o ciclo de 15 s virava 32 s e os inversores que
 # estavam respondendo apareciam atrasados na UI.
 
+BACKOFF_BASE = 15.0   # primeira espera depois de uma falha
+BACKOFF_MAX = 60.0    # teto: o painel nao fica mais de 1 min sem tentar
+
 
 def _device_fields(spec) -> tuple[str, str, str | None, float]:
     if isinstance(spec, dict):
@@ -973,42 +1071,101 @@ def _revive_pv_inputs(data: dict, stale: dict[str, str]) -> None:
         pv.pop("power_source", None)
 
 
+def _read_once(proto: str, ip: str, connect_timeout: float) -> dict:
+    link = Dongle(ip, connect_timeout=connect_timeout)
+    try:
+        return READERS[proto](link)
+    finally:
+        link.close()
+
+
+def read_device(proto: str, ip: str, connect_timeout: float,
+                attempts: int = 3, settle: float = 0.5) -> dict:
+    """Le um inversor, trocando de sessao quando a primeira vem contaminada.
+
+    Medido no `.106` (07/11): a partir da segunda sessao o dongle entrega tudo
+    certinho — QPIGS em 860 ms, QMOD/QID e o bloco Modbus de 64 registradores. As
+    falhas chegam como `(NAKss` em 435 ms ou frame vazio em 8,1 s, e insistir na
+    MESMA sessao nao resolve, porque quem esta fora de sincronia e o canal do
+    dongle com o inversor. Fechar, deixar assentar e reabrir resolve.
+
+    A espera cresce a cada tentativa (0,5 s e depois 1 s): o dongle precisa de mais
+    tempo quando esta no estado ruim do que quando perdeu um frame so.
+    """
+    last: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return _read_once(proto, ip, connect_timeout)
+        except Exception as exc:  # noqa: BLE001
+            last = exc
+            log.debug("%s: tentativa %d falhou (%s)", ip, attempt, exc)
+            if attempt < attempts:
+                time.sleep(settle * attempt)
+    raise last if last else RuntimeError("sem resposta")
+
+
 def poll_once(devices: list,
               rules: dict[str, dict] | None = None,
               state: dict[str, bool] | None = None,
               last_ok: dict[str, str] | None = None,
-              history: dict[str, dict] | None = None) -> dict:
+              history: dict[str, dict] | None = None,
+              backoff: dict[str, dict] | None = None) -> dict:
     """Le todos os inversores e publica o resultado do ciclo.
 
     `history` guarda, por inversor, a ultima leitura boa (valores + instante). O que
     falhar neste ciclo nao some do painel: o valor anterior volta marcado em
     `entry["cache"]`, para a UI mostrar o numero em cinza com a idade ao lado.
+
+    `backoff` evita martelar um inversor que esta em mau estado: depois de falhar, ele
+    e pulado por um tempo crescente (15 s, 30 s, 60 s) para o dongle se recompor. Sem
+    isso a coleta insiste a cada ciclo e mantem o canal quebrado.
     """
     rules = rules or {}
     state = state if state is not None else {}
     last_ok = last_ok if last_ok is not None else {}
     history = history if history is not None else {}
+    backoff = backoff if backoff is not None else {}
     result: dict = {"devices": {}}
     for spec in devices:
         name, ip, proto, connect_timeout = _device_fields(spec)
         entry: dict = {"ip": ip, "protocol": proto, "online": False}
-        link = None
+
+        ctl = backoff.setdefault(name, {"fails": 0, "until": 0.0})
+        if ctl["until"] > time.time():
+            entry["error"] = (f"aguardando recuperacao do dongle "
+                              f"({math.ceil(ctl['until'] - time.time())}s)")
+            entry["backoff"] = True
+            previous = history.get(name)
+            if previous:
+                stale = _fill_missing(entry, previous["values"],
+                                      previous.get("fields_at", {}), previous["at"])
+                _revive_pv_inputs(entry, stale)
+                entry["cache"] = {"at": previous["at"], "fields": stale}
+            entry["last_ok"] = last_ok.get(name) or (previous["at"] if previous else None)
+            result["devices"][name] = entry
+            continue
+
         try:
             if proto is None:
                 proto, data = detect_protocol(ip)
                 entry["protocol"] = proto
                 entry.update(data)
             else:
-                link = Dongle(ip, connect_timeout=connect_timeout)
-                entry.update(READERS[proto](link))
+                entry.update(read_device(proto, ip, connect_timeout))
             entry["online"] = True
             last_ok[name] = _now_iso()
+            ctl["fails"] = 0
+            ctl["until"] = 0.0
         except Exception as exc:
             entry["error"] = f"{type(exc).__name__}: {exc}"
-            log.warning("%s (%s): %s", name, ip, entry["error"])
-        finally:
-            if link:
-                link.close()
+            ctl["fails"] = ctl.get("fails", 0) + 1
+            # 15 s, 30 s, 60 s: o suficiente para o dongle voltar ao normal sem
+            # deixar o painel parado por muito tempo.
+            espera = min(BACKOFF_MAX, BACKOFF_BASE * (2 ** (ctl["fails"] - 1)))
+            ctl["until"] = time.time() + espera
+            entry["backoffSeconds"] = round(espera)
+            log.warning("%s (%s): %s (proxima tentativa em %ds)",
+                        name, ip, entry["error"], espera)
 
         # O PN nao sai por nenhum comando local: vem do `devices.json`, com o mesmo valor
         # que o app do fabricante mostra. O serial so e publicado quando o proprio
@@ -1077,7 +1234,8 @@ def run_cycle(devices: list,
               state: dict[str, bool],
               last_ok: dict[str, str],
               out_path: str | None = None,
-              history: dict[str, dict] | None = None) -> dict:
+              history: dict[str, dict] | None = None,
+              backoff: dict[str, dict] | None = None) -> dict:
     """Executa um ciclo e publica o resultado.
 
     Fica atras de `_State.cycle_lock` porque o dongle so aceita uma conexao por vez:
@@ -1085,7 +1243,7 @@ def run_cycle(devices: list,
     "porta 8899 ocupada".
     """
     with _State.cycle_lock:
-        data = poll_once(devices, rules, state, last_ok, history)
+        data = poll_once(devices, rules, state, last_ok, history, backoff)
         with _State.lock:
             _State.latest = data
             _State.last_ok = time.time()
@@ -1330,7 +1488,9 @@ def main() -> int:
     if history:
         log.info("estado anterior recuperado de %s (%d inversores)",
                  os.path.basename(out_path), len(history))
-    _State.cycle = lambda: run_cycle(devices, rules, automation_state, last_ok, out_path, history)
+    backoff: dict[str, dict] = {}
+    _State.cycle = lambda: run_cycle(devices, rules, automation_state, last_ok,
+                                     out_path, history, backoff)
     log.info("monitorando %d inversores a cada %.0fs (timeout %0.fs por dongle)",
              len(devices), args.interval, args.connect_timeout)
     try:

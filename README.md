@@ -498,6 +498,32 @@ Um dongle pode sumir da rede (sem energia, DHCP novo, Wi-Fi caído). O sistema c
 arquivo vier corrompido (encerramento forçado no meio da escrita deixa bytes `NUL`), ele é
 movido para `*.corrupt-<data>` e o painel recomeça do padrão em vez de falhar.
 
+### Quando o dongle fica mudo (o caso do `.106`)
+
+Houve um período em que o `.106` falhava em ~70 % dos ciclos. O que a medição mostrou:
+
+| Sintoma medido | O que significa |
+| --- | --- |
+| `(NAKss` em **~430 ms**, igual em `dev` 0 a 4 | tempo fixo demais para ser o inversor: é o **dongle** recusando a transação |
+| frame **vazio após 8,13 s** | o dongle esperou o inversor no RS485 e desistiu |
+| falha em **todos** os comandos, ASCII e Modbus | não é comando nem protocolo: é o enlace inteiro |
+| falha **na mesma sessão mantida por 120 s** e após **6 min de repouso** | não é contenção nossa nem da nuvem |
+| dongle conecta em **0,1 s**, e `.33`/`.59` leem 5/5 | rede e máquina estão bem; o problema é entre dongle e inversor |
+| em janelas boas: `QPIGS` 860 ms + 64 registradores em 1 s | o aparelho sabe responder — é intermitente |
+
+Conclusão: **enlace RS485** (cabo, conector ou UART do dongle), não software. O que o
+software garante: ler certo quando o enlace responde e **não insistir** quando está mudo.
+
+Procedimento quando isso acontecer:
+
+1. `python inverter_monitor.py --probe 192.168.18.106` — se vier `nenhum protocolo
+   conhecido respondeu`, confirme o padrão acima;
+2. **desligue o dongle da tomada por 5 s** e reconecte (reinicia a UART; resolveu em todos
+   os casos observados);
+3. se voltar a falhar em minutos, mexa no conector RS485 do inversor e no cabo;
+4. o painel mostra `recuperando` enquanto o coletor espera — os valores ficam em cinza com
+   a idade, nunca em branco.
+
 ## Instalação
 
 Requisitos: **Python 3.10+** na mesma rede dos dongles; **Node.js 20+** apenas para o
@@ -924,13 +950,19 @@ executores falsos, sem tocar no Gate, no SSH ou no XMRig.
 | Regra em `Conflito` | A pausa do Gate foi criada por outra origem | A automação não desfaz pausa alheia; libere manualmente |
 | Firewall do Windows pedindo liberação | Conexão de **entrada** na 8899 | Permita para rede privada |
 | `NAK` / valores de `QPIGS` deslocados | CRC errado | Use `pi30()` do módulo — o init do CRC é `0x0000` |
+| **`.106` falhando em ~70 % dos ciclos** | `accept` pegava o dongle errado + insistir na sessão contaminada | Corrigido na 1.6.0 (aceite por IP, troca de sessão, backoff). Se voltar: veja o diagnóstico abaixo |
+| `(NAKss` em **todos** os comandos, ASCII e Modbus, com o dongle conectando em 0,1 s | o dongle está livre, mas o inversor não responde no RS485 | Enlace físico: confira o cabo/conector RS485 e **desligue o dongle da tomada por 5 s** |
+| Frame vazio após **8,1 s** | o dongle esperou o inversor no RS485 e desistiu | Mesma causa do item acima |
+| Chip `recuperando` com os valores em cinza | o coletor deu tempo ao dongle (backoff 15/30/60 s) | Esperado; a leitura volta sozinha quando o enlace responde |
 
 ## Limitações e efeitos colaterais
 
-- **O app oficial fica sem dados enquanto estamos conectados.** O dongle mantém uma
-  conexão por vez. Com `--interval 15`, cada dongle fica conectado localmente apenas
-  durante uma leitura curta e o coletor aguarda **1,5 s** antes do próximo  redirecionamento. O app oficial pode atrasar alguns minutos e volta ao normal depois
-  que o dongle reconecta à nuvem. Não há proxy permanente neste modo.
+- **Os dongles ficam apontados para esta máquina.** O primeiro `set>server=` ensina o
+  endereço local a cada dongle, e ele passa a reconectar nele para sempre — inclusive
+  quando o coletor está parado. Por isso os **três** dongles batem na porta 8899 o tempo
+  todo, e o aceite filtra por IP: só a conexão do inversor pedido é usada, as outras são
+  fechadas (e contadas no log com `-v`). Enquanto estiverem apontados para cá, a nuvem do
+  fabricante fica sem dados.
 - **A porta 8899 é exclusiva.** Só um processo pode usá-la, e o coletor também exige a
   porta HTTP livre: se outra instância já estiver na 8080, a nova encerra em vez de rodar
   em paralelo.

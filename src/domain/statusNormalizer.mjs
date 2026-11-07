@@ -82,6 +82,11 @@ export class StatusNormalizer {
         lastOk: device.last_ok ?? null,
         lastOkAgeSeconds: this.#age(device.last_ok),
         error: device.error ?? null,
+        // Backoff = o coletor esta esperando o dongle se recompor em vez de insistir.
+        // E diferente de "sem resposta": o aparelho esta numa janela ruim e a leitura
+        // volta sozinha. A UI mostra "Recuperando", nao "falha".
+        backoff: device.backoff === true,
+        backoffSeconds: this.#finite(device.backoffSeconds, null),
         fresh: Boolean(timestamp),
         timestamp,
         stale: {

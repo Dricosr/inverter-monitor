@@ -423,6 +423,123 @@ class TestEscritaAtomica(unittest.TestCase):
             leftovers = [n for n in os.listdir(directory) if n.endswith(".tmp")]
             self.assertEqual(leftovers, [])
 
+class TestReconexaoEBackoff(unittest.TestCase):
+    """Sessao contaminada se resolve trocando de sessao; falha persistente ganha espera.
+
+    Medido no `.106` (07/11/2026): insistir na MESMA sessao nunca funcionava — as
+    falhas vinham como `(NAKss` em 435 ms ou frame vazio em 8,1 s. Reabrir a conexao
+    entregava leitura completa (QPIGS em 860 ms + Modbus de 64 registradores).
+    """
+
+    def test_read_device_troca_de_sessao_e_da_certo_na_segunda(self):
+        tentativas = {"n": 0}
+
+        def leitor(link):
+            tentativas["n"] += 1
+            if tentativas["n"] == 1:
+                raise TimeoutError("frame vazio")
+            return json.loads(json.dumps(OK_READING))
+
+        with mock.patch.object(im, "Dongle", FakeLink), \
+                mock.patch.object(im, "_read_once", lambda proto, ip, tmo: leitor(None)):
+            dados = im.read_device("modbus_a", "10.0.0.9", 5, attempts=3, settle=0)
+        self.assertEqual(tentativas["n"], 2, "trocou de sessao uma vez")
+        self.assertEqual(dados["battery"]["soc"], 55)
+
+    def test_read_device_desiste_depois_das_tentativas(self):
+        chamadas = {"n": 0}
+
+        def sempre_falha(proto, ip, tmo):
+            chamadas["n"] += 1
+            raise TimeoutError("sem resposta")
+
+        with mock.patch.object(im, "_read_once", sempre_falha):
+            with self.assertRaises(TimeoutError):
+                im.read_device("modbus_a", "10.0.0.9", 5, attempts=3, settle=0)
+        self.assertEqual(chamadas["n"], 3)
+
+    def test_falha_agenda_backoff_crescente(self):
+        backoff = {}
+        aparelho = [{"name": "x", "ip": "10.0.0.9", "protocol": "modbus_a"}]
+
+        def ciclo():
+            # Zera o relogio da espera para este ciclo realmente tentar ler de novo.
+            if "x" in backoff:
+                backoff["x"]["until"] = 0.0
+            with mock.patch.object(im, "Dongle", FakeLink), \
+                    mock.patch.dict(im.READERS, {"modbus_a": fake_reader_fail}):
+                return im.poll_once(aparelho, {}, {}, {}, {}, backoff)
+
+        self.assertEqual(ciclo()["devices"]["x"]["backoffSeconds"], 15)
+        self.assertEqual(ciclo()["devices"]["x"]["backoffSeconds"], 30, "espera dobra")
+        self.assertEqual(ciclo()["devices"]["x"]["backoffSeconds"], 60)
+        self.assertEqual(ciclo()["devices"]["x"]["backoffSeconds"], 60, "teto de 1 min")
+
+    def test_durante_o_backoff_o_inversor_nao_e_lido_e_mantem_o_ultimo_valor(self):
+        backoff = {}
+        aparelho = [{"name": "x", "ip": "10.0.0.9", "protocol": "modbus_a"}]
+        history = {}
+        with mock.patch.object(im, "Dongle", FakeLink), \
+                mock.patch.dict(im.READERS, {"modbus_a": fake_reader_ok}):
+            im.poll_once(aparelho, {}, {}, {}, history, backoff)
+        self.assertEqual(history["x"]["values"]["battery"]["soc"], 55)
+
+        # Agora falha: agenda a espera.
+        with mock.patch.object(im, "Dongle", FakeLink), \
+                mock.patch.dict(im.READERS, {"modbus_a": fake_reader_fail}):
+            im.poll_once(aparelho, {}, {}, {}, history, backoff)
+
+        # No ciclo seguinte, ainda em espera: nao tenta ler e devolve o cache.
+        tentou = {"n": 0}
+
+        def espiao(link):
+            tentou["n"] += 1
+            return json.loads(json.dumps(OK_READING))
+
+        with mock.patch.object(im, "Dongle", FakeLink), \
+                mock.patch.dict(im.READERS, {"modbus_a": espiao}):
+            durante = im.poll_once(aparelho, {}, {}, {}, history, backoff)
+
+        entrada = durante["devices"]["x"]
+        self.assertEqual(tentou["n"], 0, "nao insiste enquanto espera")
+        self.assertTrue(entrada["backoff"])
+        self.assertIn("aguardando recuperacao", entrada["error"])
+        self.assertEqual(entrada["battery"]["soc"], 55, "painel nao fica vazio")
+        self.assertIn("battery.soc", entrada["cache"]["fields"])
+
+    def test_sucesso_zera_o_backoff(self):
+        backoff = {"x": {"fails": 3, "until": 0.0}}
+        aparelho = [{"name": "x", "ip": "10.0.0.9", "protocol": "modbus_a"}]
+        with mock.patch.object(im, "Dongle", FakeLink), \
+                mock.patch.dict(im.READERS, {"modbus_a": fake_reader_ok}):
+            dados = im.poll_once(aparelho, {}, {}, {}, {}, backoff)
+        self.assertTrue(dados["devices"]["x"]["online"])
+        self.assertEqual(backoff["x"]["fails"], 0)
+        self.assertEqual(backoff["x"]["until"], 0.0)
+
+
+class TestBlocoLeTruncado(unittest.TestCase):
+    """`_modbus_block_le` nao pode devolver lista curta em silencio."""
+
+    def test_bloco_curto_levanta(self):
+        class Link:
+            def ask(self, fc, payload, timeout=None):  # noqa: ARG002
+                # cabecalho anuncia 4 bytes (2 registradores) mas pedimos 64
+                return bytes([5, 3, 4, 0xC5, 0x01, 0x00, 0x00])
+
+        with self.assertRaises(ValueError) as ctx:
+            im._modbus_block_le(Link(), im.SMG_BASE, im.SMG_COUNT, im.SMG_SLAVE, attempts=1)
+        self.assertIn("truncado", str(ctx.exception))
+
+    def test_bloco_completo_passa(self):
+        class Link:
+            def ask(self, fc, payload, timeout=None):  # noqa: ARG002
+                dados = b"".join(bytes([i & 0xFF, 0x00]) for i in range(4))
+                return bytes([5, 3, len(dados)]) + dados
+
+        regs = im._modbus_block_le(Link(), 4501, 4, 5, attempts=1)
+        self.assertEqual(regs, [0, 1, 2, 3])
+
 
 if __name__ == "__main__":
     unittest.main()

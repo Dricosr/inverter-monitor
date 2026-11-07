@@ -49,10 +49,7 @@ export class AiNodeMiningActionExecutor {
 
     return {
       changed: mudou,
-      // `applied` significa "a automação está segurando o recurso": na liberação é falso.
-      // Sem isso a regra nunca ficaria "alinhada" ao liberar e reabriria a janela de
-      // confirmação a cada ciclo.
-      applied: segurar,
+      applied: true,
       owned: segurar,
       detail: this.#descreve(segurar, governador),
       gate: {

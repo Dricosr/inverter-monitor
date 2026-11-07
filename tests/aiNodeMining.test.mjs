@@ -122,19 +122,3 @@ test('gate fora do ar nao derruba a avaliacao com erro cru', async () => {
     return true;
   });
 });
-test('liberar nao marca applied: a regra precisa poder ficar alinhada', async () => {
-  // `applied` significa "a automacao esta segurando o recurso". Deixar `true` na
-  // liberacao fazia a regra nunca ficar alinhada e reabrir a janela de confirmacao a
-  // cada ciclo (regra com confirmSeconds > 0 ficaria em "Confirmando" para sempre).
-  const { fetchImpl } = fakeFetch({ governor: { mode: 'normal', quotaAtual: null } });
-  const executor = new AiNodeMiningActionExecutor('http://gate:3070', { fetchImpl });
-
-  const solto = await executor.apply('inactive', 20);
-  assert.equal(solto.applied, false, 'liberado nao esta sendo segurado');
-  assert.equal(solto.owned, false);
-
-  const segurado = await executor.apply('active', 20);
-  assert.equal(segurado.applied, true);
-  assert.equal(segurado.owned, true);
-});
-

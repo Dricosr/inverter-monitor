@@ -157,9 +157,17 @@ function renderStatusChips(dashboard) {
 
   const online = dashboard.devices.filter((device) => device.online).length;
   const offline = dashboard.devices.filter((device) => !device.online);
+  // "Recuperando" e transitorio (o coletor deu tempo ao dongle): nao merece o mesmo
+  // alarme vermelho de um inversor realmente fora do ar.
+  const recovering = offline.filter((device) => device.backoff);
+  const down = offline.filter((device) => !device.backoff);
   chips.push(chip(offline.length ? 'warn' : 'muted', `${online}/${dashboard.devices.length} online`,
     offline.length ? `Sem resposta: ${offline.map((device) => device.name).join(', ')}` : 'Inversores respondendo na LAN'));
-  for (const device of offline.slice(0, 2)) {
+  for (const device of recovering.slice(0, 2)) {
+    chips.push(chip('warn', `${device.name} recuperando`,
+      `${offlineReason(device)} · a leitura volta sozinha`));
+  }
+  for (const device of down.slice(0, 2)) {
     chips.push(chip('danger', `${device.name} sem resposta`, device.error ?? 'O dongle não respondeu na última leitura'));
   }
 
@@ -289,7 +297,9 @@ function renderDevices(devices) {
     const chips = [device.online
       ? chip('muted', device.mode ? (MODE_LABELS[device.mode] ?? device.mode) : 'Modo não informado',
         device.mode ? (MODE_HINTS[device.mode] ?? `Modo informado pelo inversor: ${device.mode}.`) : 'O inversor não informou o modo de operação.')
-      : chip('danger', 'Sem resposta', device.error ?? 'O dongle não respondeu na última leitura')];
+      : device.backoff
+        ? chip('warn', 'Recuperando', device.error ?? 'Aguardando o dongle se recompor; a leitura volta sozinha.')
+        : chip('danger', 'Sem resposta', device.error ?? 'O dongle não respondeu na última leitura')];
     // "Leitura parcial" so faz sentido quando o snapshot esta fresco: com o arquivo
     // inteiro velho o banner do card ja explica a situacao.
     if (device.online && !allStale && staleAge(device, 'mode') != null) chips.push(chip('warn', 'Leitura parcial'));
@@ -476,6 +486,11 @@ function balanceLine(device) {
 function offlineReason(device) {
   const seconds = Number.isFinite(device.lastOkAgeSeconds) ? device.lastOkAgeSeconds : null;
   const when = device.lastOk ? formatClock(device.lastOk) : null;
+  // Dongle em recuperacao: o coletor esta dando tempo para ele voltar ao normal.
+  if (device.backoff) {
+    const espera = Number.isFinite(device.backoffSeconds) ? ` (nova tentativa em ${device.backoffSeconds}s)` : '';
+    return `Recuperando a leitura do dongle${espera} · valores da última leitura${when ? `, às ${when}` : ''}`;
+  }
   if (when && seconds != null) {
     return `Sem resposta há ${formatAge(seconds)} · os valores são da última leitura, às ${when}`;
   }
