@@ -978,7 +978,7 @@ def _now_iso() -> str:
 # inteiro (foi o que aconteceu com o `.106` em 01/11).
 CACHE_SKIP = {
     "online", "error", "last_ok", "ip", "protocol", "pn", "serial_trusted",
-    "automation", "cache", "reason",
+    "automation", "cache", "reason", "backoff", "backoffSeconds",
     "power_source", "current_source", "current_partial", "modbus_smg",
 }
 

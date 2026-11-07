@@ -541,5 +541,36 @@ class TestBlocoLeTruncado(unittest.TestCase):
         self.assertEqual(regs, [0, 1, 2, 3])
 
 
+
+class TestBackoffNaoVaza(unittest.TestCase):
+    """`backoff` e estado do coletor, nao leitura: nao pode ser herdado do cache.
+
+    Sem isso, depois de uma falha o ciclo seguinte (bem-sucedido) recebia
+    `backoff: True` do historico e o painel mostrava o inversor online **e**
+    "recuperando" ao mesmo tempo.
+    """
+
+    def test_ciclo_bom_depois_de_falha_nao_carrega_backoff(self):
+        backoff = {}
+        history = {}
+        aparelho = [{"name": "x", "ip": "10.0.0.9", "protocol": "modbus_a"}]
+
+        with mock.patch.object(im, "Dongle", FakeLink), \
+                mock.patch.dict(im.READERS, {"modbus_a": fake_reader_fail}):
+            im.poll_once(aparelho, {}, {}, {}, history, backoff)
+
+        # Ciclo seguinte: o coletor tenta de novo (espera vencida) e da certo.
+        backoff["x"]["until"] = 0.0
+        with mock.patch.object(im, "Dongle", FakeLink), \
+                mock.patch.dict(im.READERS, {"modbus_a": fake_reader_ok}):
+            depois = im.poll_once(aparelho, {}, {}, {}, history, backoff)
+
+        entrada = depois["devices"]["x"]
+        self.assertTrue(entrada["online"])
+        self.assertNotIn("backoff", entrada, "estado de espera nao e dado do inversor")
+        self.assertNotIn("backoff", history["x"]["values"])
+        self.assertNotIn("cache", entrada, "nada faltou: nao ha o que herdar")
+
+
 if __name__ == "__main__":
     unittest.main()
